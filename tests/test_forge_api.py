@@ -9,24 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.config import ServerConfig
 from app.forge.service import run_forge
 from app.main import create_app
 
+from .conftest import make_config
 
-def mock_config(**overrides) -> ServerConfig:
-    base = dict(
-        port=8790,
-        host="127.0.0.1",
-        gemini_api_key=None,
-        openai_api_key=None,
-        stats_model="stub",
-        image_model="stub",
-        use_mock=True,
-        timeout_s=5,
-    )
-    base.update(overrides)
-    return ServerConfig(**base)
+
 
 
 def sample_png(color=(200, 30, 30)) -> bytes:
@@ -49,7 +37,7 @@ def post(client: TestClient, stage: int, note: str = "", png: bytes | None = Non
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app(mock_config()))
+    return TestClient(create_app(make_config()))
 
 
 def test_healthz_reports_mock(client: TestClient):

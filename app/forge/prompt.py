@@ -50,6 +50,47 @@ def build_stats_user_prompt(note: str) -> str:
     )
 
 
+# ── img2img (Stable Diffusion) ──────────────────────────────────
+#
+# SD 1.5는 영어만 알아듣는다. 한글 프롬프트는 무시되므로 이미지용은 따로 둔다.
+# 플레이어가 쓴 설명은 스탯에만 반영한다 — 한글이라 이 모델에 넣어도 소용이 없고,
+# 애초에 "설명은 스탯만"으로 정했다.
+#
+# 단계 구분의 핵심은 프롬프트가 아니라 strength다. 프롬프트로 "형태를 바꾸지 마라"고
+# 부탁하는 것보다 변형 강도를 숫자로 정하는 쪽이 확실하다.
+IMG2IMG_STRENGTH = {
+    1: 0.35,  # 형태가 구조적으로 남는 범위
+    2: 0.80,  # 실루엣만 남기고 새로 그리는 범위
+}
+
+_IMG2IMG_NEGATIVE = (
+    "background scenery, landscape, text, letters, watermark, signature, "
+    "multiple objects, several weapons, human, hands, frame, border, "
+    "drop shadow, blurry, low quality, cropped"
+)
+
+_IMG2IMG_PROMPT = {
+    1: (
+        "the same hand-drawn weapon, cleaned up line art, tidy smooth outlines, "
+        "flat even coloring, crayon and pencil texture kept, childlike drawing style, "
+        "one single weapon centered, plain pure white background"
+    ),
+    2: (
+        "polished 2d game weapon icon, same silhouette and same main colors as the sketch, "
+        "detailed shading, metallic highlights, crisp clean edges, vibrant, high quality, "
+        "one single weapon centered, plain pure white background"
+    ),
+}
+
+
+def build_img2img_prompt(stage: int) -> tuple[str, str, float]:
+    """(프롬프트, 네거티브 프롬프트, strength) — 단계별 img2img 설정."""
+    if stage not in _IMG2IMG_PROMPT:
+        raise ValueError(f"img2img 단계는 1 또는 2여야 합니다: {stage}")
+
+    return _IMG2IMG_PROMPT[stage], _IMG2IMG_NEGATIVE, IMG2IMG_STRENGTH[stage]
+
+
 def build_refine_prompt() -> str:
     """2번 버전 — 형태를 유지한 채 다듬기."""
     return "\n".join(

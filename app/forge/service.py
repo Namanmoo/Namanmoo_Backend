@@ -13,10 +13,12 @@ from typing import Any, Callable, Protocol
 
 from ..config import ServerConfig
 from ..gemini import client as gemini
+from ..cloudflare import client as cloudflare_images
 from ..openai_api import client as openai_images
 from ..gemini.mock import mock_image, mock_seed, mock_stats
 from .clamp import clamp_stats
 from .prompt import (
+    build_img2img_prompt,
     build_refine_prompt,
     build_stats_system_prompt,
     build_stats_user_prompt,
@@ -73,21 +75,29 @@ class LiveEngine:
             if config.has_stats_provider
             else None
         )
-        self._image_opts = (
-            openai_images.OpenAIImageOptions(
-                api_key=config.openai_api_key,
-                model=config.image_model,
+        provider = config.image_provider
+        self._image_provider = provider
+
+        if provider == "cloudflare":
+            self._image_opts: Any = cloudflare_images.CloudflareImageOptions(
+                account_id=config.cloudflare_account_id,
+                api_token=config.cloudflare_api_token,
+                model=config.cloudflare_image_model,
                 timeout_s=config.timeout_s,
             )
-            if config.has_image_provider
-            else None
-        )
+        elif provider == "openai":
+            self._image_opts = openai_images.OpenAIImageOptions(
+                api_key=config.openai_api_key,
+                model=config.openai_image_model,
+                timeout_s=config.timeout_s,
+            )
+        else:
+            self._image_opts = None
 
     @property
     def name(self) -> str:
         stats = "gemini" if self._stats_opts else "none"
-        image = "openai" if self._image_opts else "none"
-        return f"stats={stats},image={image}"
+        return f"stats={stats},image={self._image_provider or 'none'}"
 
     async def stats(self, png: bytes, note: str) -> Any:
         if self._stats_opts is None:
@@ -103,9 +113,23 @@ class LiveEngine:
 
     async def image(self, png: bytes, note: str, stage: int) -> str:
         if self._image_opts is None:
-            raise RuntimeError("OPENAI_API_KEY가 없어 그림을 만들 수 없습니다.")
+            raise RuntimeError(
+                "이미지 제공자 자격증명이 없습니다 "
+                "(CLOUDFLARE_ACCOUNT_ID+CLOUDFLARE_API_TOKEN 또는 OPENAI_API_KEY)."
+            )
 
-        # 1단계는 형태를 지키는 프롬프트, 2단계는 새로 그리는 프롬프트
+        if self._image_provider == "cloudflare":
+            # 단계 구분을 strength로 강제한다 — 프롬프트로 부탁하는 것보다 확실하다
+            prompt, negative, strength = build_img2img_prompt(stage)
+            return await cloudflare_images.generate_image_edit(
+                self._image_opts,
+                image_png=png,
+                prompt=prompt,
+                negative_prompt=negative,
+                strength=strength,
+            )
+
+        # OpenAI는 strength가 없어 프롬프트로만 단계를 구분한다
         prompt = build_refine_prompt() if stage == 1 else build_upgrade_prompt(note)
         return await openai_images.generate_image_edit(
             self._image_opts, image_png=png, prompt=prompt

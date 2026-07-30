@@ -49,8 +49,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 "model": cfg.stats_model if cfg.has_stats_provider else None,
             },
             "image": {
-                "provider": "openai" if cfg.has_image_provider else None,
-                "model": cfg.image_model if cfg.has_image_provider else None,
+                "provider": cfg.image_provider,
+                "model": cfg.image_model,
             },
         }
 

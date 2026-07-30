@@ -27,10 +27,21 @@ Unity 쪽 단계 선택 흐름을 끝까지 검증할 수 있다. 목은 원본 
 
 ## 제공자가 둘이다
 
-| 하는 일 | 제공자 | 키 |
+| 하는 일 | 제공자 | 자격증명 |
 | --- | --- | --- |
 | 스탯 (이름·공격력·연사·탄속·사거리) | Gemini `gemini-flash-latest` | `GEMINI_API_KEY` |
-| 무기 그림 1·2단계 (image-to-image) | OpenAI `/v1/images/edits` | `OPENAI_API_KEY` |
+| 무기 그림 1·2단계 | **Cloudflare Workers AI** SD1.5 img2img | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` |
+| " | 또는 OpenAI `/v1/images/edits` | `OPENAI_API_KEY` |
+
+이미지는 **image-to-image여야 한다** — 1단계가 그린 그림의 형태를 지켜야 하므로
+text-to-image로는 만들 수 없다.
+
+Cloudflare를 기본으로 두는 이유는 두 가지다. 하루 10,000 뉴런이 무료고(카드 불필요),
+`strength` 파라미터로 **단계를 숫자로 강제**할 수 있다 — 1단계 0.35, 2단계 0.80.
+다른 제공자에서는 "형태를 바꾸지 마라"를 프롬프트로 부탁해야 한다.
+
+주의: SD 1.5는 영어 프롬프트만 알아듣는다. 그래서 이미지용 프롬프트는 영어로 따로
+두고(`build_img2img_prompt`), 플레이어가 쓴 한글 설명은 스탯에만 반영한다.
 
 **왜 나눴나.** Gemini 스탯은 무료 티어에서 잘 돌지만, Gemini 이미지 모델은
 무료 할당이 **0**이다. 실측한 오류가 그대로 말해 준다:
@@ -41,8 +52,8 @@ limit: 0, model: gemini-2.5-flash-preview-image
 ```
 
 기다리면 풀리는 레이트 리밋이 아니라 무료 몫이 없는 것이고, `imagen-4.0-*`는
-404(신규 사용자 제공 중단)다. OpenAI 이미지 API도 무료 티어는 없지만 신규 계정
-크레딧으로 시험할 수 있다.
+404(신규 사용자 제공 중단)다. OpenAI 이미지 API도 무료 티어가 없어 크레딧이 0이면
+`billing_hard_limit_reached`(400)가 돌아온다 — 실제로 그렇게 막혔다.
 
 한쪽 키만 넣어도 그쪽만 동작한다. `/healthz`가 어느 쪽이 살아 있는지 알려준다.
 키는 서버에만 두고 클라이언트로 내려보내지 않는다.
@@ -110,6 +121,8 @@ app/
   gemini/
     client.py        스탯용 generateContent 호출 (httpx)
     mock.py          키 없이 도는 목 구현
+  cloudflare/
+    client.py        이미지용 Workers AI img2img 호출 (httpx)
   openai_api/
     client.py        이미지용 /v1/images/edits 호출 (httpx)
 tests/               pytest
