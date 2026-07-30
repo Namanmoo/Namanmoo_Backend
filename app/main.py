@@ -44,8 +44,14 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         return {
             "ok": True,
             "source": engine.name,
-            "statsModel": cfg.stats_model if not cfg.use_mock else None,
-            "imageModel": cfg.image_model if not cfg.use_mock else None,
+            "stats": {
+                "provider": "gemini" if cfg.has_stats_provider else None,
+                "model": cfg.stats_model if cfg.has_stats_provider else None,
+            },
+            "image": {
+                "provider": "openai" if cfg.has_image_provider else None,
+                "model": cfg.image_model if cfg.has_image_provider else None,
+            },
         }
 
     @app.post("/forge", response_model=ForgeResponse)

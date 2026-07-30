@@ -13,6 +13,7 @@ from typing import Any, Callable, Protocol
 
 from ..config import ServerConfig
 from ..gemini import client as gemini
+from ..openai_api import client as openai_images
 from ..gemini.mock import mock_image, mock_seed, mock_stats
 from .clamp import clamp_stats
 from .prompt import (
@@ -53,23 +54,45 @@ class MockEngine:
         return mock_image(png, stage, mock_seed(png, note))
 
 
-class GeminiEngine:
-    name = "gemini"
+class LiveEngine:
+    """스탯은 Gemini, 이미지는 OpenAI.
+
+    제공자를 나눈 이유는 실측 때문이다 — Gemini 스탯은 무료 티어에서 잘 돌지만
+    Gemini 이미지 모델은 무료 할당이 0이었다. 한쪽 키만 있으면 그쪽만 동작하고
+    없는 쪽은 예외를 던져 상위에서 폴백으로 처리된다.
+    """
 
     def __init__(self, config: ServerConfig) -> None:
-        assert config.gemini_api_key is not None
-        self._stats_opts = gemini.GeminiCallOptions(
-            api_key=config.gemini_api_key,
-            model=config.stats_model,
-            timeout_s=config.timeout_s,
+        self._config = config
+        self._stats_opts = (
+            gemini.GeminiCallOptions(
+                api_key=config.gemini_api_key,
+                model=config.stats_model,
+                timeout_s=config.timeout_s,
+            )
+            if config.has_stats_provider
+            else None
         )
-        self._image_opts = gemini.GeminiCallOptions(
-            api_key=config.gemini_api_key,
-            model=config.image_model,
-            timeout_s=config.timeout_s,
+        self._image_opts = (
+            openai_images.OpenAIImageOptions(
+                api_key=config.openai_api_key,
+                model=config.image_model,
+                timeout_s=config.timeout_s,
+            )
+            if config.has_image_provider
+            else None
         )
 
+    @property
+    def name(self) -> str:
+        stats = "gemini" if self._stats_opts else "none"
+        image = "openai" if self._image_opts else "none"
+        return f"stats={stats},image={image}"
+
     async def stats(self, png: bytes, note: str) -> Any:
+        if self._stats_opts is None:
+            raise RuntimeError("GEMINI_API_KEY가 없어 스탯을 만들 수 없습니다.")
+
         return await gemini.generate_json(
             self._stats_opts,
             image_png=png,
@@ -79,15 +102,20 @@ class GeminiEngine:
         )
 
     async def image(self, png: bytes, note: str, stage: int) -> str:
+        if self._image_opts is None:
+            raise RuntimeError("OPENAI_API_KEY가 없어 그림을 만들 수 없습니다.")
+
         # 1단계는 형태를 지키는 프롬프트, 2단계는 새로 그리는 프롬프트
         prompt = build_refine_prompt() if stage == 1 else build_upgrade_prompt(note)
-        return await gemini.generate_image(self._image_opts, image_png=png, prompt=prompt)
+        return await openai_images.generate_image_edit(
+            self._image_opts, image_png=png, prompt=prompt
+        )
 
 
 def create_engine(config: ServerConfig) -> ForgeEngine:
-    if config.use_mock or config.gemini_api_key is None:
+    if config.use_mock:
         return MockEngine()
-    return GeminiEngine(config)
+    return LiveEngine(config)
 
 
 async def _resolve_stats(

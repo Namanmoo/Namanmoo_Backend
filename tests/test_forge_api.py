@@ -19,6 +19,7 @@ def mock_config(**overrides) -> ServerConfig:
         port=8790,
         host="127.0.0.1",
         gemini_api_key=None,
+        openai_api_key=None,
         stats_model="stub",
         image_model="stub",
         use_mock=True,

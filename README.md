@@ -21,18 +21,42 @@ python3 -m venv .venv
 ./run.sh --test     # pytest
 ```
 
-`GEMINI_API_KEY`가 없으면 **목 모드**로 뜬다. 응답 형태가 동일해서 키 없이도
-Unity 쪽 3버전 선택 흐름을 끝까지 검증할 수 있다. 목은 원본 그림을 실제로 가공해
-버전마다 다른 이미지를 만든다 — "그림이 반영되는가"까지 확인된다.
+`GEMINI_API_KEY`와 `OPENAI_API_KEY`가 모두 없으면 **목 모드**로 뜬다. 응답 형태가 동일해서 키 없이도
+Unity 쪽 단계 선택 흐름을 끝까지 검증할 수 있다. 목은 원본 그림을 실제로 가공해
+단계마다 다른 이미지를 만든다 — "그림이 반영되는가"까지 확인된다.
 
-키는 <https://aistudio.google.com/apikey> 에서 발급받아 `.env`에 넣는다
-(`.env.example` 참고). 키는 서버에만 두고 클라이언트로 내려보내지 않는다.
+## 제공자가 둘이다
+
+| 하는 일 | 제공자 | 키 |
+| --- | --- | --- |
+| 스탯 (이름·공격력·연사·탄속·사거리) | Gemini `gemini-flash-latest` | `GEMINI_API_KEY` |
+| 무기 그림 1·2단계 (image-to-image) | OpenAI `/v1/images/edits` | `OPENAI_API_KEY` |
+
+**왜 나눴나.** Gemini 스탯은 무료 티어에서 잘 돌지만, Gemini 이미지 모델은
+무료 할당이 **0**이다. 실측한 오류가 그대로 말해 준다:
+
+```
+Quota exceeded for metric: generate_content_free_tier_requests,
+limit: 0, model: gemini-2.5-flash-preview-image
+```
+
+기다리면 풀리는 레이트 리밋이 아니라 무료 몫이 없는 것이고, `imagen-4.0-*`는
+404(신규 사용자 제공 중단)다. OpenAI 이미지 API도 무료 티어는 없지만 신규 계정
+크레딧으로 시험할 수 있다.
+
+한쪽 키만 넣어도 그쪽만 동작한다. `/healthz`가 어느 쪽이 살아 있는지 알려준다.
+키는 서버에만 두고 클라이언트로 내려보내지 않는다.
 
 ## API
 
 ### `GET /healthz`
 ```json
-{ "ok": true, "source": "mock", "statsModel": null, "imageModel": null }
+{
+  "ok": true,
+  "source": "stats=gemini,image=openai",
+  "stats": { "provider": "gemini", "model": "gemini-flash-latest" },
+  "image": { "provider": "openai", "model": "gpt-image-1.5" }
+}
 ```
 
 ### `POST /forge` (multipart)
@@ -84,16 +108,22 @@ app/
     prompt.py        스탯용 1개 + 이미지용 2개 프롬프트
     service.py       스탯 1회 + 이미지 2회 병렬 실행, 폴백 처리
   gemini/
-    client.py        generateContent 호출 (httpx)
+    client.py        스탯용 generateContent 호출 (httpx)
     mock.py          키 없이 도는 목 구현
+  openai_api/
+    client.py        이미지용 /v1/images/edits 호출 (httpx)
 tests/               pytest
 ```
 
 ## 알아둘 것
 
-- **이미지 모델 ID(`GEMINI_IMAGE_MODEL`)와 `responseModalities` 동작은 실제 키로 한 번
-  확인이 필요하다.** 기본값은 `gemini-2.5-flash-image`로 두었고 env로 교체할 수 있다.
-  틀려도 이미지 생성만 실패하고 게임은 원본 그림으로 진행된다.
-- 생성 이미지는 흰 배경으로 요청한다. 투명화(누끼)는 클라이언트가 흰색 키잉으로 처리한다.
-  음영이 있는 아트에서 거칠면, 그때 서버에 rembg를 붙이는 편이 낫다.
+- **스탯은 구조화 출력(`responseSchema`)이 필수다.** 없으면 모델이 마크다운 산문을
+  내보내 파싱이 깨진다. `thinkingConfig`는 넣지 마라 — `gemini-flash-latest`가
+  400으로 거부한다(실측).
+- **OpenAI 이미지 파라미터는 모델마다 다르다.** `background=transparent` 같은 선택
+  파라미터를 붙여 한 번 시도하고, 400이면 최소 형태로 재시도한다. 문서상
+  `gpt-image-2`는 `input_fidelity`를 거부한다.
+- OpenAI에는 `background=transparent`로 요청한다. 통하면 클라이언트의 흰 배경 제거가
+  사실상 할 일이 없어진다(이미 투명한 픽셀은 그대로 통과한다). 안 통하면 프롬프트가
+  요구한 흰 배경을 클라이언트가 키잉으로 뚫는다 — 두 경우 모두 클라이언트 변경은 없다.
 - 저장소가 없다. 생성 결과를 남기려면 `data/`에 파일로 쓰거나 SQLite를 넣는다.
