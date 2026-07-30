@@ -1,13 +1,15 @@
 # NaManMoo Backend
 
 무기 만들기(Weapon Forge) API. 플레이어가 그린 그림과 "추가 설정" 텍스트를 받아
-**스탯**을 정하고 **무기 그림 3버전**을 돌려준다.
+**스탯**을 정하고, 요청한 **AI 개입 단계**의 무기 그림 한 장을 돌려준다.
 
-| 버전 | 내용 | 생성 |
+단계는 게임 안 슬라이더로 고른다. **고른 단계만 생성하므로 이미지 API 호출은 최대 1회다.**
+
+| stage | 내용 | 생성 |
 | --- | --- | --- |
-| 1 | 그린 그림 그대로 | 안 함 (클라이언트가 가진 원본 사용) |
-| 2 | 형태는 유지하고 선·색만 다듬음 | Gemini 이미지 모델 |
-| 3 | 컨셉만 살려 새로 그린 무기 아트 | Gemini 이미지 모델 |
+| 0 | 그린 그림 그대로 (개입 없음) | 안 함 — 이미지 호출 자체가 나가지 않는다 |
+| 1 | 형태는 유지하고 선·색만 다듬음 | Gemini 이미지 모델 |
+| 2 | 컨셉만 살려 새로 그린 무기 아트 | Gemini 이미지 모델 |
 
 ## 실행
 
@@ -39,25 +41,25 @@ Unity 쪽 3버전 선택 흐름을 끝까지 검증할 수 있다. 목은 원본
 | --- | --- | --- |
 | `drawing` | file | PNG. 투명 배경 그대로 올린다 |
 | `note` | text | "추가 설정" 입력값 (200자까지) |
+| `stage` | text | AI 개입 단계 `0` / `1` / `2` (기본 0) |
 
 ```jsonc
 {
   "name": "낙서 대검",
   "flavor": "…",
   "stats": { "damage": 12, "shotsPerSecond": 1.18, "projectileSpeed": 6.33, "lifetime": 3.91 },
-  "variants": [
-    { "version": 1, "image": "",        "failed": false },  // 원본 사용
-    { "version": 2, "image": "<base64>", "failed": false },
-    { "version": 3, "image": "<base64>", "failed": false }
-  ],
+  "stage": 1,
+  "image": "<base64>",     // 0단계이거나 생성 실패면 ""
+  "imageFailed": false,
   "source": "mock",
   "fallback": false,
   "clamp": { "clamped": [], "budgetScaled": false, "rawTotal": 1.122, "finalTotal": 1.121 }
 }
 ```
 
-`failed: true`인 버전은 생성에 실패한 것이고, 클라이언트가 그 칸을 원본으로 채운다.
-`fallback: true`면 스탯 생성까지 실패해 기본 무기가 지급된 것이다.
+`imageFailed: true`면 생성에 실패한 것이고, 클라이언트가 그린 그림을 그대로 쓴다
+(0단계는 실패가 아니므로 `false`다). `fallback: true`면 스탯 생성까지 실패해
+기본 무기가 지급된 것이다.
 **무엇이 실패해도 200으로 응답한다** — 게임이 멈추지 않는 게 우선이다.
 
 ## 밸런스

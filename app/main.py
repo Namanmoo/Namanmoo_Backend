@@ -1,7 +1,7 @@
 """NaManMoo 무기 생성 API.
 
-POST /forge — multipart: drawing(PNG) + note(추가 설정 텍스트)
-             → 이름/설명/스탯 + 3버전 이미지
+POST /forge — multipart: drawing(PNG) + note(추가 설정) + stage(0/1/2)
+             → 이름/설명/스탯 + 요청한 단계의 무기 이미지 한 장
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import ServerConfig, load_config
-from .forge.schema import ForgeResponse
+from .forge.schema import MAX_STAGE, ForgeResponse
 from .forge.service import create_engine, run_forge
 
 logger = logging.getLogger("namanmoo.forge")
@@ -52,6 +52,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     async def forge(
         drawing: UploadFile = File(...),
         note: str = Form(""),
+        stage: int = Form(0),
     ) -> ForgeResponse:
         png = await drawing.read()
         if not png:
@@ -60,19 +61,25 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=413, detail="그림이 너무 큽니다.")
         if not png.startswith(b"\x89PNG\r\n\x1a\n"):
             raise HTTPException(status_code=400, detail="PNG 파일이 아닙니다.")
+        if stage < 0 or stage > MAX_STAGE:
+            raise HTTPException(
+                status_code=400, detail=f"stage는 0~{MAX_STAGE} 사이여야 합니다."
+            )
 
         result = await run_forge(
             app.state.engine,
             drawing=png,
             note=note[:MAX_NOTE_LENGTH],
+            stage=stage,
             log=logger.warning,
         )
         logger.info(
-            "forge 완료 — source=%s name=%s fallback=%s 실패한버전=%s",
+            "forge 완료 — source=%s stage=%s name=%s fallback=%s 이미지실패=%s",
             result.source,
+            result.stage,
             result.name,
             result.fallback,
-            [v.version for v in result.variants if v.failed],
+            result.imageFailed,
         )
         return result
 

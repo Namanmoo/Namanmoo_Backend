@@ -1,4 +1,7 @@
-"""forge 오케스트레이션 — 스탯 1회 + 이미지 2회를 병렬로 돌리고 결과를 합친다.
+"""forge 오케스트레이션.
+
+스탯은 항상 뽑고, 이미지는 요청한 단계에서만 만든다.
+0단계는 이미지 생성 호출이 아예 없다 — 클라이언트가 그린 그림을 그대로 쓴다.
 
 AIGame pipeline.ts의 사상을 따른다: 무엇이 실패해도 게임은 진행된다.
 """
@@ -18,12 +21,7 @@ from .prompt import (
     build_stats_user_prompt,
     build_upgrade_prompt,
 )
-from .schema import (
-    ForgeLlmResult,
-    ForgeResponse,
-    ForgeVariant,
-    default_forge_result,
-)
+from .schema import ForgeLlmResult, ForgeResponse, default_forge_result
 
 STATS_MAX_ATTEMPTS = 3
 
@@ -37,7 +35,7 @@ class ForgeEngine(Protocol):
 
     async def stats(self, png: bytes, note: str) -> Any: ...
 
-    async def image(self, png: bytes, note: str, version: int) -> str: ...
+    async def image(self, png: bytes, note: str, stage: int) -> str: ...
 
 
 class MockEngine:
@@ -46,8 +44,8 @@ class MockEngine:
     async def stats(self, png: bytes, note: str) -> Any:
         return mock_stats(png, note).model_dump()
 
-    async def image(self, png: bytes, note: str, version: int) -> str:
-        return mock_image(png, version, mock_seed(png, note))
+    async def image(self, png: bytes, note: str, stage: int) -> str:
+        return mock_image(png, stage, mock_seed(png, note))
 
 
 class GeminiEngine:
@@ -74,8 +72,9 @@ class GeminiEngine:
             prompt=build_stats_user_prompt(note),
         )
 
-    async def image(self, png: bytes, note: str, version: int) -> str:
-        prompt = build_refine_prompt() if version == 2 else build_upgrade_prompt(note)
+    async def image(self, png: bytes, note: str, stage: int) -> str:
+        # 1단계는 형태를 지키는 프롬프트, 2단계는 새로 그리는 프롬프트
+        prompt = build_refine_prompt() if stage == 1 else build_upgrade_prompt(note)
         return await gemini.generate_image(self._image_opts, image_png=png, prompt=prompt)
 
 
@@ -98,15 +97,18 @@ async def _resolve_stats(
 
 
 async def _resolve_image(
-    engine: ForgeEngine, png: bytes, note: str, version: int, log: Logger
-) -> ForgeVariant:
+    engine: ForgeEngine, png: bytes, note: str, stage: int, log: Logger
+) -> tuple[str, bool]:
+    """(base64 이미지, 실패했는가). 0단계는 생성하지 않으므로 ("", False)."""
+    if stage == 0:
+        return "", False
+
     try:
-        image = await engine.image(png, note, version)
-        return ForgeVariant(version=version, image=image, failed=False)
+        return await engine.image(png, note, stage), False
     except Exception as err:
-        log(f"{version}번 이미지 생성 실패 — {err}")
-        # 실패해도 클라이언트는 원본 그림으로 그 칸을 채운다
-        return ForgeVariant(version=version, image="", failed=True)
+        log(f"{stage}단계 이미지 생성 실패 — {err}")
+        # 실패해도 클라이언트는 원본 그림으로 대체한다
+        return "", True
 
 
 async def run_forge(
@@ -114,26 +116,25 @@ async def run_forge(
     *,
     drawing: bytes,
     note: str,
+    stage: int = 0,
     log: Logger = lambda _message: None,
 ) -> ForgeResponse:
-    # 스탯과 이미지 두 장을 동시에 — 순차로 하면 대기 시간이 그대로 더해진다
-    stats_outcome, refined, upgraded = await asyncio.gather(
+    # 스탯과 이미지를 동시에 — 순차로 하면 대기 시간이 그대로 더해진다
+    stats_outcome, image_outcome = await asyncio.gather(
         _resolve_stats(engine, drawing, note, log),
-        _resolve_image(engine, drawing, note, 2, log),
-        _resolve_image(engine, drawing, note, 3, log),
+        _resolve_image(engine, drawing, note, stage, log),
     )
     llm_result, fallback = stats_outcome
+    image, image_failed = image_outcome
     stats, report = clamp_stats(llm_result.stats)
 
     return ForgeResponse(
         name=llm_result.name,
         flavor=llm_result.flavor,
         stats=stats,
-        variants=[
-            ForgeVariant(version=1, image="", failed=False),
-            refined,
-            upgraded,
-        ],
+        stage=stage,
+        image=image,
+        imageFailed=image_failed,
         source=engine.name,
         fallback=fallback,
         clamp=report,

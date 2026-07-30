@@ -53,19 +53,24 @@ class ClampReport(BaseModel):
     finalTotal: float
 
 
-class ForgeVariant(BaseModel):
-    version: Literal[1, 2, 3]
-    # base64 PNG. 1번은 클라이언트가 가진 원본을 쓰므로 항상 빈 문자열
-    image: str
-    # 생성에 실패해 원본으로 대체해야 하는가
-    failed: bool
+# AI 개입 단계. 클라이언트 슬라이더가 그대로 보낸다.
+#   0 = 개입 없음      — 그린 그림을 그대로 쓴다 (이미지 생성 호출 없음)
+#   1 = 조금 멋있게    — 형태를 유지하고 선·색만 다듬는다
+#   2 = 완전 멋있게    — 컨셉만 살려 새로 그린다
+Stage = Literal[0, 1, 2]
+MAX_STAGE = 2
 
 
 class ForgeResponse(BaseModel):
     name: str
     flavor: str
     stats: ForgeStats
-    variants: list[ForgeVariant]
+    # 요청한 단계를 그대로 돌려준다 (클라이언트가 응답을 확인할 수 있게)
+    stage: Stage
+    # base64 PNG. 0단계이거나 생성이 실패하면 빈 문자열 — 클라이언트가 원본을 쓴다
+    image: str
+    # 생성에 실패해 원본으로 대체해야 하는가 (0단계는 실패가 아니므로 false)
+    imageFailed: bool
     # 'gemini' | 'mock' — 클라이언트가 목 결과임을 표시할 수 있게
     source: str
     # 스탯 생성에 끝내 실패해 기본 무기가 지급됐는가
