@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,8 @@ class ServerConfig:
     use_mock: bool
     # 호출 하나당 타임아웃(초). 이미지 생성이 느려 넉넉히 잡는다.
     timeout_s: float
+    # 무기고 저장 위치
+    data_dir: Path
 
     @property
     def has_stats_provider(self) -> bool:
@@ -111,4 +114,5 @@ def load_config(env: dict[str, str] | None = None) -> ServerConfig:
         image_provider_override=override,
         use_mock=force_mock or nothing_configured,
         timeout_s=float(src.get("FORGE_TIMEOUT_S", "180")),
+        data_dir=Path(src.get("DATA_DIR", "data")),
     )

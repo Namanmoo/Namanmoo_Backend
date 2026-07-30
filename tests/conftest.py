@@ -5,6 +5,9 @@ ServerConfig에 필드가 늘 때마다 테스트마다 고치지 않도록 한 
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 from app.config import ServerConfig
 
 
@@ -22,6 +25,7 @@ def make_config(**overrides) -> ServerConfig:
         image_provider_override=None,
         use_mock=True,
         timeout_s=5,
+        data_dir=Path(tempfile.mkdtemp(prefix="namanmoo-test-")),
     )
     base.update(overrides)
     return ServerConfig(**base)

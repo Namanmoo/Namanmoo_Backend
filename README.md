@@ -70,6 +70,19 @@ limit: 0, model: gemini-2.5-flash-preview-image
 }
 ```
 
+### `GET /weapons` — 무기고 목록 (최신순)
+```jsonc
+{ "weapons": [ { "id": "…", "name": "불꽃 검", "flavor": "…", "stage": 1,
+                 "stats": { … }, "createdAt": "2026-07-30T…+00:00" } ] }
+```
+
+### `POST /weapons` (multipart) — 무기 저장
+`image`(PNG) + `name` `flavor` `stage` `damage` `shotsPerSecond` `projectileSpeed` `lifetime`.
+스탯은 여기서도 클램프한다 — 무기고를 통해 밸런스가 새지 않게.
+
+### `GET /weapons/{id}/image` — PNG 바이트
+### `DELETE /weapons/{id}`
+
 ### `POST /forge` (multipart)
 
 | 필드 | 타입 | 설명 |
@@ -145,4 +158,7 @@ tests/               pytest
      떠다니는 점으로 남는다. 큰 덩어리의 8% 미만만 버려서 일부러 떼어 그린 부품은 살린다.
   4. 손질 후 남은 게 0.5% 미만이면 **생성 실패로 처리한다.** SD가 드물게 거의 빈 이미지를
      내는데, 그대로 넘기면 게임에 보이지 않는 무기가 들어간다(실제로 겪었다).
-- 저장소가 없다. 생성 결과를 남기려면 `data/`에 파일로 쓰거나 SQLite를 넣는다.
+- 무기고는 `data/weapons/`에 파일로 둔다 — `index.json`(메타데이터) + `<id>.png`(그림).
+  프로토라 SQLite 대신 파일이다. 눈으로 열어볼 수 있고 이미지가 그대로 파일이라
+  디버깅이 쉽다. `index.json`은 임시 파일에 쓴 뒤 교체해 쓰다가 죽어도 목록이 안 깨진다.
+- 계정 개념이 없어 무기고는 하나뿐이다. 여러 사용자를 받으려면 계정 축을 넣어야 한다.

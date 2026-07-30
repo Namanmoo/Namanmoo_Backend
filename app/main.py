@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from .config import ServerConfig, load_config
-from .forge.schema import MAX_STAGE, ForgeResponse
+from .forge.clamp import clamp_stats
+from .forge.schema import MAX_STAGE, ForgeResponse, ForgeStats
 from .forge.service import create_engine, run_forge
+from .vault.schema import SavedWeapon, SavedWeaponList
+from .vault.store import WeaponNotFound, WeaponStore, new_weapon_id, utc_now_iso
 
 logger = logging.getLogger("namanmoo.forge")
 
@@ -88,6 +92,77 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             result.imageFailed,
         )
         return result
+
+    # ── 무기고 ──────────────────────────────────────────────
+
+    store = WeaponStore(cfg.data_dir / "weapons")
+    app.state.store = store
+
+    @app.get("/weapons", response_model=SavedWeaponList)
+    async def list_weapons() -> SavedWeaponList:
+        return SavedWeaponList(weapons=store.list())
+
+    @app.post("/weapons", response_model=SavedWeapon)
+    async def save_weapon(
+        image: UploadFile = File(...),
+        name: str = Form(...),
+        flavor: str = Form(""),
+        stage: int = Form(0),
+        damage: float = Form(...),
+        shotsPerSecond: float = Form(...),
+        projectileSpeed: float = Form(...),
+        lifetime: float = Form(...),
+    ) -> SavedWeapon:
+        png = await image.read()
+        if not png.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise HTTPException(status_code=400, detail="PNG 파일이 아닙니다.")
+        if len(png) > MAX_DRAWING_BYTES:
+            raise HTTPException(status_code=413, detail="그림이 너무 큽니다.")
+
+        # 무기고에 들어가는 값도 게임 범위로 조인다 — 클라이언트를 믿지 않는다
+        stats, _ = clamp_stats(
+            ForgeStats(
+                damage=damage,
+                shotsPerSecond=shotsPerSecond,
+                projectileSpeed=projectileSpeed,
+                lifetime=lifetime,
+            )
+        )
+
+        try:
+            weapon = SavedWeapon(
+                id=new_weapon_id(),
+                name=name.strip()[:24] or "이름 없는 무기",
+                flavor=flavor.strip()[:120],
+                stage=stage,
+                stats=stats,
+                createdAt=utc_now_iso(),
+            )
+        except ValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+
+        saved = store.save(weapon, png)
+        logger.info("무기 저장 — %s (%s단계) %s", saved.name, saved.stage, saved.id)
+        return saved
+
+    @app.get("/weapons/{weapon_id}/image")
+    async def weapon_image(weapon_id: str) -> Response:
+        try:
+            png = store.read_image(weapon_id)
+        except WeaponNotFound as err:
+            raise HTTPException(status_code=404, detail="없는 무기입니다.") from err
+
+        return Response(content=png, media_type="image/png")
+
+    @app.delete("/weapons/{weapon_id}")
+    async def delete_weapon(weapon_id: str) -> dict[str, bool]:
+        try:
+            store.delete(weapon_id)
+        except WeaponNotFound as err:
+            raise HTTPException(status_code=404, detail="없는 무기입니다.") from err
+
+        logger.info("무기 삭제 — %s", weapon_id)
+        return {"ok": True}
 
     return app
 
