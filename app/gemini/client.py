@@ -36,10 +36,37 @@ async def _call(opts: GeminiCallOptions, body: dict[str, Any]) -> dict[str, Any]
             headers={"content-type": "application/json"},
         )
         if res.status_code != 200:
+            # 300자로 자르다가 쿼터 이름("...PerDayPerProjectPerModel")이 잘려
+            # 분당 한도인지 일일 한도인지 로그만 보고는 알 수 없었다.
             raise RuntimeError(
-                f"Gemini 호출 실패 ({res.status_code}): {res.text[:300]}"
+                f"Gemini 호출 실패 ({res.status_code}): {_summarise_error(res)}"
             )
         return res.json()
+
+
+def _summarise_error(response: httpx.Response) -> str:
+    """오류에서 진단에 필요한 것만 한 줄로 — 쿼터 이름과 재시도 권고를 남긴다."""
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        return response.text[:300]
+
+    pieces = [error.get("status") or "", (error.get("message") or "").split("\n")[0][:160]]
+
+    for detail in error.get("details") or []:
+        kind = detail.get("@type", "")
+        if "QuotaFailure" in kind:
+            for violation in detail.get("violations") or []:
+                pieces.append(f"quota={violation.get('quotaId')}")
+        elif "RetryInfo" in kind:
+            pieces.append(f"retryAfter={detail.get('retryDelay')}")
+
+    # limit: N 은 message 안에 있어 따로 뽑는다
+    for part in (error.get("message") or "").split("*"):
+        if "limit:" in part:
+            pieces.append(part.strip()[:80])
+
+    return " | ".join(p for p in pieces if p)
 
 
 def _parts(payload: dict[str, Any]) -> list[dict[str, Any]]:

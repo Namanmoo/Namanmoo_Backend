@@ -106,7 +106,7 @@ def load_config(env: dict[str, str] | None = None) -> ServerConfig:
         openai_api_key=openai_key,
         cloudflare_account_id=cf_account,
         cloudflare_api_token=cf_token,
-        stats_model=src.get("GEMINI_STATS_MODEL", "gemini-flash-latest"),
+        stats_model=src.get("GEMINI_STATS_MODEL", "gemini-flash-lite-latest"),
         openai_image_model=src.get("OPENAI_IMAGE_MODEL", "gpt-image-1.5"),
         cloudflare_image_model=src.get(
             "CLOUDFLARE_IMAGE_MODEL", "@cf/runwayml/stable-diffusion-v1-5-img2img"
