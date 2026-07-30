@@ -82,9 +82,32 @@ def _blocked_reason(payload: dict[str, Any]) -> str | None:
 
 
 async def generate_json(
-    opts: GeminiCallOptions, *, image_png: bytes, system: str, prompt: str
+    opts: GeminiCallOptions,
+    *,
+    image_png: bytes,
+    system: str,
+    prompt: str,
+    response_schema: dict[str, Any] | None = None,
 ) -> Any:
-    """그림 + 프롬프트 → JSON 응답."""
+    """그림 + 프롬프트 → JSON 응답.
+
+    스키마를 주면 구조화 출력을 켠다. 이게 핵심이다 — 스키마 없이는 모델이
+    "제시해주신 무기의 디자인에 맞추어… ### 🗡️" 같은 마크다운 산문을 내보내
+    파싱이 깨졌다.
+
+    maxOutputTokens는 1024에서 올렸다. 그 값에서는 응답이 문장 중간에서 잘렸다.
+
+    thinkingConfig는 넣지 않는다. gemini-flash-latest에 thinkingBudget 0을 주면
+    400 INVALID_ARGUMENT로 거부한다(실측). 스키마만으로 충분하다.
+    """
+    generation_config: dict[str, Any] = {
+        "maxOutputTokens": 4096,
+        "temperature": 1.0,
+    }
+    if response_schema is not None:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
+
     payload = await _call(
         opts,
         {
@@ -102,7 +125,7 @@ async def generate_json(
                     ]
                 }
             ],
-            "generationConfig": {"maxOutputTokens": 1024, "temperature": 1.0},
+            "generationConfig": generation_config,
         },
     )
 

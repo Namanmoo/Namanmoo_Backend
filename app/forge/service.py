@@ -21,7 +21,12 @@ from .prompt import (
     build_stats_user_prompt,
     build_upgrade_prompt,
 )
-from .schema import ForgeLlmResult, ForgeResponse, default_forge_result
+from .schema import (
+    ForgeLlmResult,
+    ForgeResponse,
+    default_forge_result,
+    stats_response_schema,
+)
 
 STATS_MAX_ATTEMPTS = 3
 
@@ -70,6 +75,7 @@ class GeminiEngine:
             image_png=png,
             system=build_stats_system_prompt(),
             prompt=build_stats_user_prompt(note),
+            response_schema=stats_response_schema(),
         )
 
     async def image(self, png: bytes, note: str, stage: int) -> str:

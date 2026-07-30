@@ -78,6 +78,28 @@ class ForgeResponse(BaseModel):
     clamp: ClampReport
 
 
+def stats_response_schema() -> dict:
+    """Gemini 구조화 출력용 스키마.
+
+    이걸 주지 않으면 모델이 설명을 곁들인 마크다운을 내보내 파싱이 깨진다
+    (실제로 "**Flavor:** * Name: ..." 같은 응답을 받았다).
+    """
+    number = {"type": "NUMBER"}
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "name": {"type": "STRING"},
+            "flavor": {"type": "STRING"},
+            "stats": {
+                "type": "OBJECT",
+                "properties": {key: number for key in STAT_KEYS},
+                "required": list(STAT_KEYS),
+            },
+        },
+        "required": ["name", "flavor", "stats"],
+    }
+
+
 def default_forge_result() -> ForgeLlmResult:
     """모델이 끝내 쓸 만한 답을 못 냈을 때 지급되는 무기."""
     return ForgeLlmResult(
