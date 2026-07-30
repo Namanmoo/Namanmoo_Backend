@@ -9,6 +9,7 @@ AIGame pipeline.ts의 사상을 따른다: 무엇이 실패해도 게임은 진�
 from __future__ import annotations
 
 import asyncio
+import base64
 from typing import Any, Callable, Protocol
 
 from ..config import ServerConfig
@@ -17,6 +18,13 @@ from ..cloudflare import client as cloudflare_images
 from ..openai_api import client as openai_images
 from ..gemini.mock import mock_image, mock_seed, mock_stats
 from .clamp import clamp_stats
+from .image_prep import (
+    SubjectVanished,
+    drop_small_islands,
+    flatten_to_white,
+    opaque_ratio,
+    remove_light_background,
+)
 from .prompt import (
     build_img2img_prompt,
     build_refine_prompt,
@@ -32,6 +40,16 @@ from .schema import (
 )
 
 STATS_MAX_ATTEMPTS = 3
+
+# 이미지 모델에 보낼 정사각형 크기. 비율이 들쭉날쭉하면 구도가 흔들린다.
+IMAGE_INPUT_SIZE = 512
+
+# 429/503은 잠깐 뒤 풀리는 경우가 많아 재시도 사이에 조금 쉰다
+STATS_RETRY_DELAY_S = 2.0
+
+# 손질 후 이만큼도 남지 않으면 생성이 사실상 빈 이미지였다고 본다.
+# 정상 결과는 4~5% 정도였고, 실제로 0%가 나온 판이 있었다.
+MIN_SUBJECT_RATIO = 0.005
 
 Logger = Callable[[str], None]
 
@@ -118,6 +136,10 @@ class LiveEngine:
                 "(CLOUDFLARE_ACCOUNT_ID+CLOUDFLARE_API_TOKEN 또는 OPENAI_API_KEY)."
             )
 
+        # 투명 배경을 흰색으로 눕혀 보낸다. 안 하면 모델이 투명 영역을 검정으로
+        # 읽고 검은 배경을 그대로 보존한다 (실제로 그렇게 나왔다).
+        png = flatten_to_white(png, size=IMAGE_INPUT_SIZE)
+
         if self._image_provider == "cloudflare":
             # 단계 구분을 strength로 강제한다 — 프롬프트로 부탁하는 것보다 확실하다
             prompt, negative, strength = build_img2img_prompt(stage)
@@ -151,6 +173,9 @@ async def _resolve_stats(
             return ForgeLlmResult.model_validate(raw), False
         except Exception as err:  # 스키마 위반과 호출 실패를 같이 처리한다
             log(f"스탯 실패 ({attempt}/{STATS_MAX_ATTEMPTS}) — {err}")
+            if attempt < STATS_MAX_ATTEMPTS:
+                # 곧바로 세 번 던지면 분당 한도(429)를 스스로 더 밀어낸다
+                await asyncio.sleep(STATS_RETRY_DELAY_S)
     return default_forge_result(), True
 
 
@@ -162,11 +187,38 @@ async def _resolve_image(
         return "", False
 
     try:
-        return await engine.image(png, note, stage), False
+        generated = await engine.image(png, note, stage)
     except Exception as err:
         log(f"{stage}단계 이미지 생성 실패 — {err}")
         # 실패해도 클라이언트는 원본 그림으로 대체한다
         return "", True
+
+    try:
+        return _clean_generated(generated), False
+    except SubjectVanished as err:
+        # 보이지 않는 무기를 넘기는 것보다 그린 그림으로 돌아가는 게 낫다
+        log(f"{stage}단계 생성물이 거의 비어 있어 그린 그림을 쓴다 — {err}")
+        return "", True
+    except Exception as err:
+        # 손질만 실패하면 생성 원본이라도 넘긴다 — 배경이 남는 게 무기가 없는 것보다 낫다
+        log(f"{stage}단계 이미지 손질 실패, 생성 원본을 그대로 씀 — {err}")
+        return generated, False
+
+
+def _clean_generated(image_base64: str) -> str:
+    """생성 이미지를 게임에 바로 쓸 수 있는 상태로 만든다.
+
+    프롬프트를 조여도 SD는 옅은 배경 무늬·유령 실루엣·글자 파편을 끼워 넣는다.
+    결과에서 직접 지우는 편이 프롬프트 두더지잡기보다 확실했다.
+    """
+    raw = base64.b64decode(image_base64)
+    cleaned = drop_small_islands(remove_light_background(raw))
+
+    ratio = opaque_ratio(cleaned)
+    if ratio < MIN_SUBJECT_RATIO:
+        raise SubjectVanished(f"남은 불투명 비율 {ratio:.3%}")
+
+    return base64.b64encode(cleaned).decode("ascii")
 
 
 async def run_forge(

@@ -60,25 +60,37 @@ def build_stats_user_prompt(note: str) -> str:
 # 부탁하는 것보다 변형 강도를 숫자로 정하는 쪽이 확실하다.
 IMG2IMG_STRENGTH = {
     1: 0.35,  # 형태가 구조적으로 남는 범위
-    2: 0.80,  # 실루엣만 남기고 새로 그리는 범위
+    # 0.80으로 뒀더니 단일 피사체 제약이 무너져 한 장에 무기 3개를 그렸다.
+    # 0.62면 확실히 달라지면서도 구도는 유지된다.
+    2: 0.62,
 }
 
+# 실측으로 늘어난 목록이다 — 여러 개를 그리거나 격자로 배치하는 실패가 잦았다.
 _IMG2IMG_NEGATIVE = (
-    "background scenery, landscape, text, letters, watermark, signature, "
-    "multiple objects, several weapons, human, hands, frame, border, "
+    "multiple objects, several weapons, two weapons, three weapons, collage, "
+    "grid, tiled, sprite sheet, variations, duplicate, "
+    "background scenery, landscape, dark background, black background, "
+    "textured background, patterned background, pebbles, stones, bokeh, "
+    "gradient background, noise, vignette, paper texture, fabric, "
+    "text, letters, watermark, signature, human, hands, frame, border, "
     "drop shadow, blurry, low quality, cropped"
+)
+
+_SHARED_SUFFIX = (
+    "exactly one single weapon, centered, "
+    "isolated on a completely flat solid pure white background, no background detail"
 )
 
 _IMG2IMG_PROMPT = {
     1: (
         "the same hand-drawn weapon, cleaned up line art, tidy smooth outlines, "
         "flat even coloring, crayon and pencil texture kept, childlike drawing style, "
-        "one single weapon centered, plain pure white background"
+        f"{_SHARED_SUFFIX}"
     ),
     2: (
         "polished 2d game weapon icon, same silhouette and same main colors as the sketch, "
         "detailed shading, metallic highlights, crisp clean edges, vibrant, high quality, "
-        "one single weapon centered, plain pure white background"
+        f"{_SHARED_SUFFIX}"
     ),
 }
 
