@@ -57,6 +57,32 @@ async def _post(
         )
 
 
+def _looks_like_parameter_problem(response: httpx.Response) -> bool:
+    """400이 '파라미터가 안 맞아서'인지 판별한다.
+
+    결제 한도(billing_hard_limit_reached)나 인증 문제도 400으로 오는데, 그건
+    파라미터를 빼고 다시 보내도 똑같이 실패한다 — 실패한 호출을 두 번 하는 셈이라
+    구분해서 한 번만 시도한다.
+    """
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        return False
+
+    if error.get("param"):
+        return True
+
+    code = (error.get("code") or "").lower()
+    if "billing" in code or "quota" in code or "limit" in code:
+        return False
+
+    message = (error.get("message") or "").lower()
+    return any(
+        hint in message
+        for hint in ("unknown parameter", "unsupported", "invalid value", "not supported")
+    )
+
+
 def _extract(payload: dict[str, Any]) -> str:
     items = payload.get("data") or []
     if not items:
@@ -77,7 +103,7 @@ async def generate_image_edit(
     """
     response = await _post(opts, prompt, image_png, _optional_fields(opts))
 
-    if response.status_code == 400:
+    if response.status_code == 400 and _looks_like_parameter_problem(response):
         # 모델이 선택 파라미터 중 하나를 거부한 경우 — 핵심만 남겨 다시 시도
         response = await _post(opts, prompt, image_png, {})
 
