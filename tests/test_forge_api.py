@@ -1,4 +1,4 @@
-"""/forge 엔드포인트 — 목 모드 응답과 실패 폴백 동작."""
+"""/forge 엔드포인트 — 단계별 응답과 실패 폴백 동작."""
 
 from __future__ import annotations
 
@@ -9,23 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.config import ServerConfig
 from app.forge.service import run_forge
 from app.main import create_app
 
+from .conftest import make_config
 
-def mock_config(**overrides) -> ServerConfig:
-    base = dict(
-        port=8790,
-        host="127.0.0.1",
-        gemini_api_key=None,
-        stats_model="stub",
-        image_model="stub",
-        use_mock=True,
-        timeout_s=5,
-    )
-    base.update(overrides)
-    return ServerConfig(**base)
+
 
 
 def sample_png(color=(200, 30, 30)) -> bytes:
@@ -38,9 +27,17 @@ def sample_png(color=(200, 30, 30)) -> bytes:
     return buffer.getvalue()
 
 
+def post(client: TestClient, stage: int, note: str = "", png: bytes | None = None):
+    return client.post(
+        "/forge",
+        files={"drawing": ("drawing.png", png or sample_png(), "image/png")},
+        data={"note": note, "stage": str(stage)},
+    )
+
+
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app(mock_config()))
+    return TestClient(create_app(make_config()))
 
 
 def test_healthz_reports_mock(client: TestClient):
@@ -50,47 +47,45 @@ def test_healthz_reports_mock(client: TestClient):
     assert res.json()["source"] == "mock"
 
 
-def test_forge_returns_three_variants(client: TestClient):
-    res = client.post(
-        "/forge",
-        files={"drawing": ("drawing.png", sample_png(), "image/png")},
-        data={"note": "불이 나오는 검"},
-    )
+def test_stage_zero_does_not_generate_an_image(client: TestClient):
+    """0단계는 개입이 없다 — 이미지 생성 호출도, 이미지도 없어야 한다."""
+    body = post(client, stage=0).json()
 
-    assert res.status_code == 200
-    body = res.json()
-    assert [v["version"] for v in body["variants"]] == [1, 2, 3]
-    # 1번은 클라이언트가 원본을 쓰므로 이미지가 비어 있어야 한다
-    assert body["variants"][0]["image"] == ""
-    assert body["variants"][1]["image"] != ""
-    assert body["variants"][2]["image"] != ""
-    assert body["fallback"] is False
-    assert body["source"] == "mock"
+    assert body["stage"] == 0
+    assert body["image"] == ""
+    assert body["imageFailed"] is False
+    # 스탯은 0단계에서도 나온다
+    assert body["stats"]["damage"] > 0
 
 
-def test_generated_variants_are_valid_pngs_and_differ(client: TestClient):
-    res = client.post(
-        "/forge",
-        files={"drawing": ("drawing.png", sample_png(), "image/png")},
-        data={"note": ""},
-    )
-    variants = res.json()["variants"]
+@pytest.mark.parametrize("stage", [1, 2])
+def test_generating_stages_return_an_image(client: TestClient, stage: int):
+    body = post(client, stage=stage).json()
 
-    images = [base64.b64decode(v["image"]) for v in variants[1:]]
-    for raw in images:
-        assert Image.open(io.BytesIO(raw)).size == (64, 64)
-    # 두 버전이 같은 그림이면 선택 UI가 의미 없다
-    assert images[0] != images[1]
+    assert body["stage"] == stage
+    assert body["image"] != ""
+    assert body["imageFailed"] is False
+    assert Image.open(io.BytesIO(base64.b64decode(body["image"]))).size == (64, 64)
 
 
-def test_same_drawing_and_note_give_same_stats(client: TestClient):
+def test_stage_one_and_two_differ(client: TestClient):
+    """단계가 결과를 바꾸지 않으면 슬라이더가 의미 없다."""
     png = sample_png()
-    first = client.post(
-        "/forge", files={"drawing": ("d.png", png, "image/png")}, data={"note": "얼음"}
-    ).json()
-    second = client.post(
-        "/forge", files={"drawing": ("d.png", png, "image/png")}, data={"note": "얼음"}
-    ).json()
+    one = post(client, stage=1, png=png).json()["image"]
+    two = post(client, stage=2, png=png).json()["image"]
+
+    assert one != two
+
+
+def test_stage_out_of_range_is_rejected(client: TestClient):
+    assert post(client, stage=3).status_code == 400
+    assert post(client, stage=-1).status_code == 400
+
+
+def test_same_input_gives_same_stats(client: TestClient):
+    png = sample_png()
+    first = post(client, stage=1, note="얼음", png=png).json()
+    second = post(client, stage=1, note="얼음", png=png).json()
 
     assert first["stats"] == second["stats"]
     assert first["name"] == second["name"]
@@ -100,7 +95,7 @@ def test_rejects_non_png(client: TestClient):
     res = client.post(
         "/forge",
         files={"drawing": ("drawing.txt", b"not an image", "image/png")},
-        data={"note": ""},
+        data={"note": "", "stage": "0"},
     )
 
     assert res.status_code == 400
@@ -110,14 +105,14 @@ def test_rejects_empty_upload(client: TestClient):
     res = client.post(
         "/forge",
         files={"drawing": ("drawing.png", b"", "image/png")},
-        data={"note": ""},
+        data={"note": "", "stage": "0"},
     )
 
     assert res.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_stats_failure_falls_back_but_still_returns_images():
+async def test_stats_failure_falls_back_but_still_returns_the_image():
     """스탯이 끝내 실패해도 기본 무기로 게임은 진행되어야 한다."""
 
     class BrokenStatsEngine:
@@ -126,18 +121,19 @@ async def test_stats_failure_falls_back_but_still_returns_images():
         async def stats(self, png: bytes, note: str):
             raise RuntimeError("모델이 응답하지 않음")
 
-        async def image(self, png: bytes, note: str, version: int) -> str:
+        async def image(self, png: bytes, note: str, stage: int) -> str:
             return "ZmFrZQ=="
 
-    result = await run_forge(BrokenStatsEngine(), drawing=sample_png(), note="")
+    result = await run_forge(BrokenStatsEngine(), drawing=sample_png(), note="", stage=2)
 
     assert result.fallback is True
     assert result.name == "연필 막대"
-    assert all(not v.failed for v in result.variants)
+    assert result.image == "ZmFrZQ=="
+    assert result.imageFailed is False
 
 
 @pytest.mark.asyncio
-async def test_image_failure_marks_variant_without_killing_request():
+async def test_image_failure_is_flagged_without_killing_the_request():
     class BrokenImageEngine:
         name = "broken-image"
 
@@ -153,12 +149,42 @@ async def test_image_failure_marks_variant_without_killing_request():
                 },
             }
 
-        async def image(self, png: bytes, note: str, version: int) -> str:
+        async def image(self, png: bytes, note: str, stage: int) -> str:
             raise RuntimeError("이미지 모델 오류")
 
-    result = await run_forge(BrokenImageEngine(), drawing=sample_png(), note="")
+    result = await run_forge(BrokenImageEngine(), drawing=sample_png(), note="", stage=1)
 
     assert result.fallback is False
-    assert result.variants[0].failed is False
-    assert result.variants[1].failed is True
-    assert result.variants[2].failed is True
+    assert result.image == ""
+    assert result.imageFailed is True
+
+
+@pytest.mark.asyncio
+async def test_stage_zero_never_calls_the_image_engine():
+    """0단계에서 이미지 호출이 나가면 쓸데없이 API 비용이 든다."""
+    calls: list[int] = []
+
+    class CountingEngine:
+        name = "counting"
+
+        async def stats(self, png: bytes, note: str):
+            return {
+                "name": "검",
+                "flavor": "설명",
+                "stats": {
+                    "damage": 5,
+                    "shotsPerSecond": 3,
+                    "projectileSpeed": 8,
+                    "lifetime": 4,
+                },
+            }
+
+        async def image(self, png: bytes, note: str, stage: int) -> str:
+            calls.append(stage)
+            return "ZmFrZQ=="
+
+    await run_forge(CountingEngine(), drawing=sample_png(), note="", stage=0)
+    assert calls == []
+
+    await run_forge(CountingEngine(), drawing=sample_png(), note="", stage=2)
+    assert calls == [2]

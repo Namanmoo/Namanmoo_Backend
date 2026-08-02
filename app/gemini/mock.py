@@ -62,13 +62,13 @@ def _flatten_to_white(image: Image.Image) -> Image.Image:
     return Image.alpha_composite(white, rgba).convert("RGB")
 
 
-def _fallback_shape(version: int, seed: int, size: int = 512) -> Image.Image:
+def _fallback_shape(stage: int, seed: int, size: int = 512) -> Image.Image:
     """원본을 열 수 없을 때 쓰는 단순 도형."""
     from PIL import ImageDraw
 
     image = Image.new("RGB", (size, size), (255, 255, 255))
     draw = ImageDraw.Draw(image)
-    hue = (seed >> (version * 4)) % 360
+    hue = (seed >> (stage * 4)) % 360
     color = tuple(
         int(c * 255)
         for c in __import__("colorsys").hsv_to_rgb(hue / 360, 0.65, 0.9)
@@ -85,14 +85,14 @@ def _fallback_shape(version: int, seed: int, size: int = 512) -> Image.Image:
     return image
 
 
-def mock_image(png: bytes, version: int, seed: int) -> str:
-    """원본을 가공해 버전별로 다른 이미지를 만든다. 반환값은 base64 PNG."""
+def mock_image(png: bytes, stage: int, seed: int) -> str:
+    """원본을 가공해 단계별로 다른 이미지를 만든다. 반환값은 base64 PNG."""
     try:
         source = _flatten_to_white(Image.open(io.BytesIO(png)))
     except Exception:
-        source = _fallback_shape(version, seed)
+        source = _fallback_shape(stage, seed)
 
-    if version == 2:
+    if stage == 1:
         # 살짝 다듬기 — 부드럽게 + 대비를 올려 선이 또렷해 보이게
         out = source.filter(ImageFilter.SMOOTH_MORE)
         out = ImageEnhance.Contrast(out).enhance(1.35)

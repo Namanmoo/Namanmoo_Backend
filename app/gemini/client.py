@@ -36,10 +36,37 @@ async def _call(opts: GeminiCallOptions, body: dict[str, Any]) -> dict[str, Any]
             headers={"content-type": "application/json"},
         )
         if res.status_code != 200:
+            # 300자로 자르다가 쿼터 이름("...PerDayPerProjectPerModel")이 잘려
+            # 분당 한도인지 일일 한도인지 로그만 보고는 알 수 없었다.
             raise RuntimeError(
-                f"Gemini 호출 실패 ({res.status_code}): {res.text[:300]}"
+                f"Gemini 호출 실패 ({res.status_code}): {_summarise_error(res)}"
             )
         return res.json()
+
+
+def _summarise_error(response: httpx.Response) -> str:
+    """오류에서 진단에 필요한 것만 한 줄로 — 쿼터 이름과 재시도 권고를 남긴다."""
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        return response.text[:300]
+
+    pieces = [error.get("status") or "", (error.get("message") or "").split("\n")[0][:160]]
+
+    for detail in error.get("details") or []:
+        kind = detail.get("@type", "")
+        if "QuotaFailure" in kind:
+            for violation in detail.get("violations") or []:
+                pieces.append(f"quota={violation.get('quotaId')}")
+        elif "RetryInfo" in kind:
+            pieces.append(f"retryAfter={detail.get('retryDelay')}")
+
+    # limit: N 은 message 안에 있어 따로 뽑는다
+    for part in (error.get("message") or "").split("*"):
+        if "limit:" in part:
+            pieces.append(part.strip()[:80])
+
+    return " | ".join(p for p in pieces if p)
 
 
 def _parts(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -82,9 +109,32 @@ def _blocked_reason(payload: dict[str, Any]) -> str | None:
 
 
 async def generate_json(
-    opts: GeminiCallOptions, *, image_png: bytes, system: str, prompt: str
+    opts: GeminiCallOptions,
+    *,
+    image_png: bytes,
+    system: str,
+    prompt: str,
+    response_schema: dict[str, Any] | None = None,
 ) -> Any:
-    """그림 + 프롬프트 → JSON 응답."""
+    """그림 + 프롬프트 → JSON 응답.
+
+    스키마를 주면 구조화 출력을 켠다. 이게 핵심이다 — 스키마 없이는 모델이
+    "제시해주신 무기의 디자인에 맞추어… ### 🗡️" 같은 마크다운 산문을 내보내
+    파싱이 깨졌다.
+
+    maxOutputTokens는 1024에서 올렸다. 그 값에서는 응답이 문장 중간에서 잘렸다.
+
+    thinkingConfig는 넣지 않는다. gemini-flash-latest에 thinkingBudget 0을 주면
+    400 INVALID_ARGUMENT로 거부한다(실측). 스키마만으로 충분하다.
+    """
+    generation_config: dict[str, Any] = {
+        "maxOutputTokens": 4096,
+        "temperature": 1.0,
+    }
+    if response_schema is not None:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
+
     payload = await _call(
         opts,
         {
@@ -102,7 +152,7 @@ async def generate_json(
                     ]
                 }
             ],
-            "generationConfig": {"maxOutputTokens": 1024, "temperature": 1.0},
+            "generationConfig": generation_config,
         },
     )
 
