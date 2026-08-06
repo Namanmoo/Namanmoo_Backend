@@ -55,7 +55,8 @@ def test_stage_zero_does_not_generate_an_image(client: TestClient):
     assert body["image"] == ""
     assert body["imageFailed"] is False
     # 스탯은 0단계에서도 나온다
-    assert body["stats"]["damage"] > 0
+    damage = next(p["value"] for p in body["weapon"]["stats"] if p["key"] == "damage")
+    assert damage > 0
 
 
 @pytest.mark.parametrize("stage", [1, 2])
@@ -87,7 +88,7 @@ def test_same_input_gives_same_stats(client: TestClient):
     first = post(client, stage=1, note="얼음", png=png).json()
     second = post(client, stage=1, note="얼음", png=png).json()
 
-    assert first["stats"] == second["stats"]
+    assert first["weapon"] == second["weapon"]
     assert first["name"] == second["name"]
 
 
@@ -141,12 +142,17 @@ async def test_image_failure_is_flagged_without_killing_the_request():
             return {
                 "name": "테스트 검",
                 "flavor": "설명",
-                "stats": {
-                    "damage": 5,
-                    "shotsPerSecond": 3,
-                    "projectileSpeed": 8,
-                    "lifetime": 4,
-                },
+                "category": "ranged",
+                "weaponType": "Projectile",
+                "stats": [
+                    {"key": "damage", "value": 5},
+                    {"key": "shotsPerSecond", "value": 3},
+                    {"key": "projectileSpeed", "value": 8},
+                    {"key": "lifetime", "value": 4},
+                ],
+                "delivery": {"deliveryId": "straight", "params": []},
+                "effects": [],
+                "effortScore": 0.3,
             }
 
         async def image(self, png: bytes, note: str, stage: int) -> str:
@@ -171,12 +177,17 @@ async def test_stage_zero_never_calls_the_image_engine():
             return {
                 "name": "검",
                 "flavor": "설명",
-                "stats": {
-                    "damage": 5,
-                    "shotsPerSecond": 3,
-                    "projectileSpeed": 8,
-                    "lifetime": 4,
-                },
+                "category": "ranged",
+                "weaponType": "Projectile",
+                "stats": [
+                    {"key": "damage", "value": 5},
+                    {"key": "shotsPerSecond", "value": 3},
+                    {"key": "projectileSpeed", "value": 8},
+                    {"key": "lifetime", "value": 4},
+                ],
+                "delivery": {"deliveryId": "straight", "params": []},
+                "effects": [],
+                "effortScore": 0.3,
             }
 
         async def image(self, png: bytes, note: str, stage: int) -> str:

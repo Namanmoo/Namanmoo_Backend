@@ -17,7 +17,8 @@ from ..gemini import client as gemini
 from ..cloudflare import client as cloudflare_images
 from ..openai_api import client as openai_images
 from ..gemini.mock import mock_image, mock_seed, mock_stats
-from .clamp import clamp_stats
+from .clamp import clamp_weapon
+from .slash import make_slash_shape
 from .image_prep import (
     SubjectVanished,
     drop_small_islands,
@@ -28,15 +29,15 @@ from .image_prep import (
 from .prompt import (
     build_img2img_prompt,
     build_refine_prompt,
-    build_stats_system_prompt,
-    build_stats_user_prompt,
+    build_weapon_system_prompt,
+    build_weapon_user_prompt,
     build_upgrade_prompt,
 )
 from .schema import (
     ForgeLlmResult,
     ForgeResponse,
     default_forge_result,
-    stats_response_schema,
+    weapon_response_schema,
 )
 
 STATS_MAX_ATTEMPTS = 3
@@ -124,9 +125,9 @@ class LiveEngine:
         return await gemini.generate_json(
             self._stats_opts,
             image_png=png,
-            system=build_stats_system_prompt(),
-            prompt=build_stats_user_prompt(note),
-            response_schema=stats_response_schema(),
+            system=build_weapon_system_prompt(),
+            prompt=build_weapon_user_prompt(note),
+            response_schema=weapon_response_schema(),
         )
 
     async def image(self, png: bytes, note: str, stage: int) -> str:
@@ -236,16 +237,22 @@ async def run_forge(
     )
     llm_result, fallback = stats_outcome
     image, image_failed = image_outcome
-    stats, report = clamp_stats(llm_result.stats)
+    weapon, report = clamp_weapon(llm_result)
+
+    # 검기가 붙었으면 참격 모양을 지금 뽑아 무기에 박는다 — 모양도 무기의 일부다
+    if weapon.slashShape is None and any(
+        entry.effectId == "blade_wave" for entry in weapon.effects
+    ):
+        weapon.slashShape = make_slash_shape()
 
     return ForgeResponse(
         name=llm_result.name,
         flavor=llm_result.flavor,
-        stats=stats,
+        weapon=weapon,
         stage=stage,
         image=image,
         imageFailed=image_failed,
         source=engine.name,
         fallback=fallback,
-        clamp=report,
+        budget=report,
     )

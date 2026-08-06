@@ -1,0 +1,522 @@
+{
+  "$comment": "무기 카탈로그 — 단일 원본. 백엔드(프롬프트 생성·버젯 검증)와 Unity(실행)가 함께 쓴다. 이중 정의 금지. 클라이언트 사본은 tools/sync-catalog.py 로 맞춘다.",
+  "version": "1.0.0",
+  "$axes": "무기 = 분류(category) × 궤도(delivery) × 효과(trigger + effect)*. AI 는 이 세 축에서 고르기만 하고, 실행은 전부 Unity 구현이 한다. 궤도는 무기 종류와 1:1이다 — 검=swing, 도끼=spin, 창=thrust, 투사체(Projectile)=straight, 유도탄(Missile)=homing, 부메랑(Boomerang)=boomerang. (2026-08 개명: 옛 Gun→Projectile, 옛 Projectile→Missile. 백엔드 카탈로그·프롬프트·저장된 무기 JSON 의 weaponType 문자열도 같이 마이그레이션해야 한다.)",
+  "categories": [
+    {
+      "id": "melee",
+      "displayName_ko": "근접",
+      "description_ko": "플레이어 주변을 직접 타격한다. 사거리는 짧지만 탄 소모가 없고 광역이 넓다.",
+      "weaponTypes": [
+        "Sword",
+        "Axe",
+        "Spear"
+      ],
+      "stats": [
+        {
+          "key": "damage",
+          "min": 1,
+          "max": 30,
+          "weight": 40
+        },
+        {
+          "key": "attacksPerSecond",
+          "min": 0.5,
+          "max": 5,
+          "weight": 30
+        },
+        {
+          "key": "reach",
+          "min": 0.8,
+          "max": 3,
+          "weight": 20
+        },
+        {
+          "key": "attackArc",
+          "min": 45,
+          "max": 180,
+          "weight": 10
+        }
+      ]
+    },
+    {
+      "id": "ranged",
+      "displayName_ko": "원거리",
+      "description_ko": "투사체를 날려 떨어진 적을 친다. 안전하지만 발당 피해가 낮고 빗나갈 수 있다.",
+      "weaponTypes": [
+        "Projectile",
+        "Missile",
+        "Boomerang"
+      ],
+      "stats": [
+        {
+          "key": "damage",
+          "min": 1,
+          "max": 30,
+          "weight": 40
+        },
+        {
+          "key": "shotsPerSecond",
+          "min": 0.5,
+          "max": 8,
+          "weight": 30
+        },
+        {
+          "key": "projectileSpeed",
+          "min": 3,
+          "max": 20,
+          "weight": 15
+        },
+        {
+          "key": "lifetime",
+          "min": 0.5,
+          "max": 8,
+          "weight": 15
+        }
+      ]
+    }
+  ],
+  "deliveries": [
+    {
+      "id": "straight",
+      "weaponType": "Projectile",
+      "categories": [
+        "ranged"
+      ],
+      "displayName_ko": "직선 발사",
+      "description_ko": "조준 방향으로 곧게 날아간다. 가장 기본적인 궤도.",
+      "baseCost": 0,
+      "params": []
+    },
+    {
+      "id": "homing",
+      "weaponType": "Missile",
+      "categories": [
+        "ranged"
+      ],
+      "displayName_ko": "유도탄",
+      "description_ko": "가장 가까운 적을 향해 궤도를 꺾으며 쫓아간다. 선회 속도가 낮으면 크게 돌아간다.",
+      "baseCost": 12,
+      "params": [
+        {
+          "key": "turnRateDegPerSecond",
+          "min": 90,
+          "max": 540,
+          "step": 45,
+          "costPerStep": 2
+        },
+        {
+          "key": "acquireRange",
+          "min": 3,
+          "max": 10,
+          "step": 1,
+          "costPerStep": 1
+        }
+      ]
+    },
+    {
+      "id": "boomerang",
+      "weaponType": "Boomerang",
+      "categories": [
+        "ranged"
+      ],
+      "displayName_ko": "부메랑",
+      "description_ko": "일정 거리까지 날아간 뒤 플레이어에게 되돌아온다. 오가며 두 번 타격한다.",
+      "baseCost": 10,
+      "params": [
+        {
+          "key": "maxDistance",
+          "min": 3,
+          "max": 9,
+          "step": 1,
+          "costPerStep": 2
+        }
+      ]
+    },
+    {
+      "id": "swing",
+      "weaponType": "Sword",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "휘두르기",
+      "description_ko": "전방 부채꼴을 훑는다. 가장 기본적인 근접 동작.",
+      "baseCost": 0,
+      "params": []
+    },
+    {
+      "id": "thrust",
+      "weaponType": "Spear",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "찌르기",
+      "description_ko": "좁고 긴 직선을 찌른다. 부채꼴이 좁아지는 대신 사거리가 늘어난다.",
+      "baseCost": 2,
+      "params": [
+        {
+          "key": "reachBonus",
+          "min": 0.5,
+          "max": 2,
+          "step": 0.5,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "spin",
+      "weaponType": "Axe",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "회전 베기",
+      "description_ko": "제자리에서 한 바퀴 돌며 주위 전체를 벤다. 방향을 가리지 않는다.",
+      "baseCost": 8,
+      "params": []
+    }
+  ],
+  "triggers": [
+    {
+      "id": "on_hit",
+      "displayName_ko": "명중 시",
+      "description_ko": "공격이 적에게 맞았을 때 발동한다.",
+      "params": []
+    },
+    {
+      "id": "on_kill",
+      "displayName_ko": "처치 시",
+      "description_ko": "공격으로 적을 쓰러뜨렸을 때 발동한다.",
+      "params": []
+    },
+    {
+      "id": "after_seconds",
+      "displayName_ko": "N초 후",
+      "description_ko": "공격이 나간 뒤 지정 시간이 지나면 그 자리에서 발동한다.",
+      "params": [
+        {
+          "key": "delaySeconds",
+          "min": 0.5,
+          "max": 4,
+          "step": 0.5,
+          "costPerStep": 0
+        }
+      ]
+    },
+    {
+      "id": "on_cooldown",
+      "displayName_ko": "재사용 대기 후",
+      "description_ko": "지정한 쿨다운이 돌 때마다 저절로 발동한다. 조준과 무관하게 터진다.",
+      "params": [
+        {
+          "key": "cooldownSeconds",
+          "min": 3,
+          "max": 12,
+          "step": 1,
+          "costPerStep": -1
+        }
+      ]
+    },
+    {
+      "id": "on_attack",
+      "displayName_ko": "공격 시",
+      "description_ko": "공격이 나갈 때마다 발동한다.",
+      "params": []
+    }
+  ],
+  "effects": [
+    {
+      "id": "fire_dot",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "화염",
+      "description_ko": "대상을 불태워 일정 시간 지속 피해를 준다.",
+      "baseCost": 8,
+      "params": [
+        {
+          "key": "dotDamagePerSecond",
+          "min": 1,
+          "max": 6,
+          "step": 1,
+          "costPerStep": 3
+        },
+        {
+          "key": "durationSeconds",
+          "min": 2,
+          "max": 6,
+          "step": 1,
+          "costPerStep": 2
+        }
+      ]
+    },
+    {
+      "id": "chill_slow",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "냉기",
+      "description_ko": "대상을 얼려 이동 속도를 떨어뜨린다.",
+      "baseCost": 7,
+      "params": [
+        {
+          "key": "slowPercent",
+          "min": 10,
+          "max": 50,
+          "step": 5,
+          "costPerStep": 2
+        },
+        {
+          "key": "durationSeconds",
+          "min": 1,
+          "max": 4,
+          "step": 0.5,
+          "costPerStep": 2
+        }
+      ]
+    },
+    {
+      "id": "poison_stack",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "독",
+      "description_ko": "중첩되는 독을 건다. 쌓일수록 초당 피해가 커진다.",
+      "baseCost": 9,
+      "params": [
+        {
+          "key": "damagePerStackPerSecond",
+          "min": 1,
+          "max": 3,
+          "step": 1,
+          "costPerStep": 4
+        },
+        {
+          "key": "maxStacks",
+          "min": 2,
+          "max": 8,
+          "step": 1,
+          "costPerStep": 2
+        },
+        {
+          "key": "durationSeconds",
+          "min": 3,
+          "max": 6,
+          "step": 1,
+          "costPerStep": 1
+        }
+      ]
+    },
+    {
+      "id": "shock",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "전격",
+      "description_ko": "추가 피해를 주고 잠시 그 자리에 굳힌다.",
+      "baseCost": 8,
+      "params": [
+        {
+          "key": "bonusDamage",
+          "min": 2,
+          "max": 10,
+          "step": 1,
+          "costPerStep": 2
+        },
+        {
+          "key": "staggerSeconds",
+          "min": 0.2,
+          "max": 0.6,
+          "step": 0.1,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "explosion",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "폭발",
+      "description_ko": "터진 지점 주위를 한 번에 친다.",
+      "baseCost": 10,
+      "params": [
+        {
+          "key": "explosionDamage",
+          "min": 3,
+          "max": 15,
+          "step": 1,
+          "costPerStep": 2
+        },
+        {
+          "key": "explosionRadius",
+          "min": 1,
+          "max": 4,
+          "step": 0.5,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "chain",
+      "categories": [
+        "melee",
+        "ranged"
+      ],
+      "displayName_ko": "연쇄",
+      "description_ko": "피해가 주변 적에게 차례로 옮겨붙는다.",
+      "baseCost": 10,
+      "params": [
+        {
+          "key": "maxChains",
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "costPerStep": 4
+        },
+        {
+          "key": "chainDamagePercent",
+          "min": 30,
+          "max": 80,
+          "step": 10,
+          "costPerStep": 2
+        },
+        {
+          "key": "chainRange",
+          "min": 2,
+          "max": 5,
+          "step": 0.5,
+          "costPerStep": 1
+        }
+      ]
+    },
+    {
+      "id": "pierce",
+      "categories": [
+        "ranged"
+      ],
+      "displayName_ko": "관통",
+      "description_ko": "투사체가 적을 뚫고 계속 날아간다.",
+      "baseCost": 8,
+      "params": [
+        {
+          "key": "maxPierceCount",
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "ricochet",
+      "categories": [
+        "ranged"
+      ],
+      "displayName_ko": "도탄",
+      "description_ko": "투사체가 벽에 맞으면 튕겨 나가 계속 날아간다.",
+      "baseCost": 7,
+      "params": [
+        {
+          "key": "maxBounces",
+          "min": 1,
+          "max": 4,
+          "step": 1,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "shockwave",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "충격파",
+      "description_ko": "지면을 때려 주위 적을 밀어내며 친다.",
+      "baseCost": 9,
+      "params": [
+        {
+          "key": "waveDamage",
+          "min": 2,
+          "max": 12,
+          "step": 1,
+          "costPerStep": 2
+        },
+        {
+          "key": "waveRadius",
+          "min": 1.5,
+          "max": 4,
+          "step": 0.5,
+          "costPerStep": 3
+        },
+        {
+          "key": "knockbackForce",
+          "min": 1,
+          "max": 6,
+          "step": 1,
+          "costPerStep": 1
+        }
+      ]
+    },
+    {
+      "id": "lifesteal",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "흡혈",
+      "description_ko": "준 피해의 일부만큼 플레이어 체력을 회복한다.",
+      "baseCost": 8,
+      "params": [
+        {
+          "key": "lifestealPercent",
+          "min": 3,
+          "max": 15,
+          "step": 1,
+          "costPerStep": 3
+        }
+      ]
+    },
+    {
+      "id": "blade_wave",
+      "categories": [
+        "melee"
+      ],
+      "displayName_ko": "검기",
+      "description_ko": "공격할 때마다 참격이 전방으로 날아간다. 근접 무기에 원거리 견제를 준다.",
+      "baseCost": 12,
+      "params": [
+        {
+          "key": "waveSpeed",
+          "min": 6,
+          "max": 16,
+          "step": 1,
+          "costPerStep": 1
+        },
+        {
+          "key": "waveRange",
+          "min": 3,
+          "max": 8,
+          "step": 1,
+          "costPerStep": 2
+        },
+        {
+          "key": "waveDamagePercent",
+          "min": 30,
+          "max": 100,
+          "step": 10,
+          "costPerStep": 2
+        }
+      ]
+    }
+  ],
+  "budget": {
+    "$comment": "스탯은 정규화(0~1) × weight 로 비용이 매겨진다. 모든 스탯을 최대로 찍으면 그것만으로 100 이라 궤도·효과를 붙일 수 없다 — 그 트레이드오프가 이 시스템의 전부다.",
+    "weaponBase": 100,
+    "effortBonusMax": 15,
+    "maxEffects": 3
+  }
+}
