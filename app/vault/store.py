@@ -82,6 +82,16 @@ class WeaponStore:
         self._write_index([weapon, *self.list()])
         return weapon
 
+    def update(self, weapon: SavedWeapon) -> SavedWeapon:
+        """같은 id의 항목을 통째로 바꾼다. 없으면 WeaponNotFound."""
+        weapons = self.list()
+        for index, existing in enumerate(weapons):
+            if existing.id == weapon.id:
+                weapons[index] = weapon
+                self._write_index(weapons)
+                return weapon
+        raise WeaponNotFound(weapon.id)
+
     def delete(self, weapon_id: str) -> None:
         remaining = [w for w in self.list() if w.id != weapon_id]
         if len(remaining) == len(self.list()):

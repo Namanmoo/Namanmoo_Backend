@@ -9,34 +9,124 @@ from __future__ import annotations
 
 import base64
 import io
+import os
+import random
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-from ..forge.schema import STAT_RANGES, ForgeLlmResult, ForgeStats
+from ..forge.catalog import load_catalog
+from ..forge.examples import sample_effect_pairs
+from ..forge.schema import ForgeDelivery, ForgeEffectEntry, ForgeLlmResult, ParamPair
 
 _PREFIX = ("삐뚤빼뚤", "낙서", "크레용", "스케치", "연필심", "색종이")
 _NOUN = ("대검", "광선총", "망치", "창", "지팡이", "단검")
 
 
 def mock_seed(png: bytes, note: str) -> int:
-    """그림 바이트에서 뽑은 결정적 시드 — 같은 그림이면 같은 결과가 나온다."""
+    """그림 바이트에서 뽑은 결정적 시드 — 같은 그림이면 같은 결과가 나온다.
+
+    간격을 크기에 맞춰 잡는다. 997로 고정하면 작은 PNG는 첫 바이트(항상 0x89)
+    하나만 보게 되어 어떤 그림을 넣어도 같은 무기가 나온다.
+    """
+    stride = max(1, len(png) // 512)
     h = 2166136261
-    for i in range(0, len(png), 997):
+    for i in range(0, len(png), stride):
         h = ((h ^ png[i]) * 16777619) & 0xFFFFFFFF
     for ch in note:
         h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
     return h
 
 
+def _requested_delivery(catalog, note: str):
+    """메모(또는 FORGE_FORCE_DELIVERY 환경변수)에서 궤도 지명을 찾는다.
+
+    목 모드 전용 개발 편의다. 원하는 궤도가 나올 때까지 다시 그리는 대신
+    추가 설정에 궤도 이름("검기"든 "blade_wave"든)을 적으면 그 궤도가 나온다.
+    자동화 테스트처럼 입력칸을 못 쓰는 곳은 환경변수로 강제한다:
+    FORGE_FORCE_DELIVERY=blade_wave ./run.sh
+    """
+    for delivery in catalog.deliveries:
+        if delivery.id in note or delivery.display_name in note:
+            return delivery
+
+    forced = os.environ.get("FORGE_FORCE_DELIVERY", "").strip()
+    return catalog.delivery(forced) if forced else None
+
+
+def _requested_effect(catalog, note: str):
+    """메모(또는 FORGE_FORCE_EFFECT 환경변수)에서 효과 지명을 찾는다.
+
+    "검기"나 "화염"처럼 효과 이름을 적으면 그 효과가 반드시 붙는다.
+    """
+    for effect in catalog.effects:
+        if effect.id in note or effect.display_name in note:
+            return effect
+
+    forced = os.environ.get("FORGE_FORCE_EFFECT", "").strip()
+    return catalog.effect(forced) if forced else None
+
+
+def _trigger_for(effect_id: str) -> str:
+    """지명된 효과에 어울리는 트리거 — 검기는 맞아야가 아니라 공격마다 나간다."""
+    return "on_attack" if effect_id == "blade_wave" else "on_hit"
+
+
 def mock_stats(png: bytes, note: str) -> ForgeLlmResult:
+    """카탈로그에서 실제로 유효한 무기를 결정적으로 뽑는다.
+
+    키 없이도 3축(분류·궤도·효과)이 끝까지 흐르는지 보는 게 목적이라,
+    스탯만 채우고 마는 대신 궤도와 효과까지 고른다.
+    """
     seed = mock_seed(png, note)
+    catalog = load_catalog()
+    rng = random.Random(seed)
 
     def t(offset: int) -> float:
         return ((seed >> offset) & 0xFF) / 255
 
-    def scaled(key: str, ratio: float) -> float:
-        r = STAT_RANGES[key]
-        return r.min + ratio * (r.max - r.min)
+    requested = _requested_delivery(catalog, note)
+    wanted_effect = _requested_effect(catalog, note)
+
+    # 지명이 있으면 그것이 허용되는 분류로 맞춘다 — 검기를 시켰는데
+    # 검기가 못 붙는 분류가 나오면 지명이 조용히 증발한다.
+    if requested is not None:
+        allowed = [c for c in catalog.categories if requested.allows(c.id)]
+    elif wanted_effect is not None:
+        allowed = [c for c in catalog.categories if wanted_effect.allows(c.id)]
+    else:
+        allowed = list(catalog.categories)
+
+    category = allowed[seed % len(allowed)]
+
+    if requested is not None and requested.allows(category.id):
+        delivery = requested
+    else:
+        deliveries = catalog.deliveries_for(category.id)
+        delivery = deliveries[(seed >> 5) % len(deliveries)]
+
+    # 스탯은 범위의 20~55% 사이 — 궤도·효과를 붙일 예산을 남긴다
+    stats = [
+        ParamPair(key=s.key, value=round(s.denormalize(0.2 + 0.35 * t(8 * i)), 2))
+        for i, s in enumerate(category.stats)
+    ]
+
+    if wanted_effect is not None and wanted_effect.allows(category.id):
+        effects = [
+            ForgeEffectEntry(
+                effectId=wanted_effect.id,
+                triggerId=_trigger_for(wanted_effect.id),
+                params=[],
+            )
+        ]
+    else:
+        effects = [
+            ForgeEffectEntry(
+                effectId=effect.id,
+                triggerId=trigger.id,
+                params=[ParamPair(key=k, value=v) for k, v in params.items()],
+            )
+            for effect, trigger, params in sample_effect_pairs(catalog, category.id, 1, rng)
+        ]
 
     note = note.strip()
     return ForgeLlmResult(
@@ -46,12 +136,12 @@ def mock_stats(png: bytes, note: str) -> ForgeLlmResult:
             if note
             else "종이 냄새가 나는 무기다."
         ),
-        stats=ForgeStats(
-            damage=scaled("damage", t(0)),
-            shotsPerSecond=scaled("shotsPerSecond", t(8)),
-            projectileSpeed=scaled("projectileSpeed", t(16)),
-            lifetime=scaled("lifetime", t(24)),
-        ),
+        category=category.id,
+        weaponType=category.weapon_types[(seed >> 11) % len(category.weapon_types)],
+        stats=stats,
+        delivery=ForgeDelivery(deliveryId=delivery.id, params=[]),
+        effects=effects,
+        effortScore=round(t(16), 2),
     )
 
 
