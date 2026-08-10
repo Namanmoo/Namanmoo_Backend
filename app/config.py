@@ -40,43 +40,77 @@ class ServerConfig:
     timeout_s: float
     # 무기고 저장 위치
     data_dir: Path
+    # Gemini 이미지 모델 — IMAGE_PROVIDER=gemini일 때만 쓴다.
+    # 무료 티어는 이미지 할당이 0이라(실측) 결제 활성화(Tier 1)가 필요하다.
+    gemini_image_model: str = "gemini-2.5-flash-image"
 
     @property
     def has_stats_provider(self) -> bool:
         return not self.use_mock and self.gemini_api_key is not None
 
     @property
-    def image_provider(self) -> str | None:
-        """'cloudflare' | 'openai' | None.
+    def image_provider_chain(self) -> tuple[tuple[str, str | None], ...]:
+        """시도 순서대로의 (제공자, 모델) 목록 — 자격증명 없는 항목은 걸러진다.
 
-        Cloudflare를 먼저 본다 — 무료 할당이 있고 img2img strength로 단계를
-        숫자로 제어할 수 있어서다. OpenAI는 크레딧이 있을 때의 대안이다.
+        IMAGE_PROVIDER에 쉼표로 순서를 지정하고, 항목마다 `제공자:모델`로 모델을
+        고정할 수 있다. 모델을 생략하면 그 제공자의 기본 모델(*_IMAGE_MODEL)을 쓴다.
+
+            IMAGE_PROVIDER=gemini:gemini-3.1-flash-image,gemini,cloudflare
+            → 나노바나나2 → 나노바나나(기본) → SD1.5 순서로 폴백
+
+        지정이 없으면 기존처럼 Cloudflare 우선 단일 제공자 — 무료 할당이 있고
+        strength로 단계를 숫자로 제어할 수 있어서다. Gemini는 무료 이미지 할당이
+        0이라(실측) 명시했을 때만 체인에 들어간다.
         """
         if self.use_mock:
-            return None
+            return ()
 
-        has_cloudflare = bool(self.cloudflare_account_id and self.cloudflare_api_token)
-        has_openai = bool(self.openai_api_key)
+        has = {
+            "gemini": bool(self.gemini_api_key),
+            "openai": bool(self.openai_api_key),
+            "cloudflare": bool(
+                self.cloudflare_account_id and self.cloudflare_api_token
+            ),
+        }
 
-        if self.image_provider_override == "cloudflare":
-            return "cloudflare" if has_cloudflare else None
-        if self.image_provider_override == "openai":
-            return "openai" if has_openai else None
+        if self.image_provider_override:
+            chain: list[tuple[str, str | None]] = []
+            for part in self.image_provider_override.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                provider, _, model = part.partition(":")
+                if has[provider]:
+                    chain.append((provider, model.strip() or None))
+            return tuple(chain)
 
-        if has_cloudflare:
-            return "cloudflare"
-        if has_openai:
-            return "openai"
-        return None
+        if has["cloudflare"]:
+            return (("cloudflare", None),)
+        if has["openai"]:
+            return (("openai", None),)
+        return ()
 
     @property
-    def image_model(self) -> str | None:
-        provider = self.image_provider
+    def image_provider(self) -> str | None:
+        """체인의 첫 제공자 — 기존 호출부와 표시용."""
+        chain = self.image_provider_chain
+        return chain[0][0] if chain else None
+
+    def default_image_model(self, provider: str) -> str:
+        """제공자의 기본 모델 — 체인 항목에 모델이 명시되지 않았을 때 쓴다."""
         if provider == "cloudflare":
             return self.cloudflare_image_model
         if provider == "openai":
             return self.openai_image_model
-        return None
+        return self.gemini_image_model
+
+    @property
+    def image_model(self) -> str | None:
+        chain = self.image_provider_chain
+        if not chain:
+            return None
+        provider, model = chain[0]
+        return model or self.default_image_model(provider)
 
 
 def load_config(env: dict[str, str] | None = None) -> ServerConfig:
@@ -92,10 +126,14 @@ def load_config(env: dict[str, str] | None = None) -> ServerConfig:
     force_mock = (src.get("FORGE_MODE") or "").strip().lower() == "mock"
 
     override = (src.get("IMAGE_PROVIDER") or "").strip().lower() or None
-    if override not in (None, "cloudflare", "openai"):
-        raise ValueError(
-            f"IMAGE_PROVIDER는 cloudflare 또는 openai여야 합니다: {override}"
-        )
+    if override is not None:
+        for part in override.split(","):
+            provider = part.strip().partition(":")[0]
+            if provider not in ("cloudflare", "openai", "gemini"):
+                raise ValueError(
+                    "IMAGE_PROVIDER는 cloudflare, openai, gemini를 쉼표로 나열해야"
+                    f" 합니다 (모델 고정은 '제공자:모델'): {override}"
+                )
 
     nothing_configured = not any((gemini_key, openai_key, cf_account and cf_token))
 
@@ -115,4 +153,5 @@ def load_config(env: dict[str, str] | None = None) -> ServerConfig:
         use_mock=force_mock or nothing_configured,
         timeout_s=float(src.get("FORGE_TIMEOUT_S", "180")),
         data_dir=Path(src.get("DATA_DIR", "data")),
+        gemini_image_model=src.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
     )
