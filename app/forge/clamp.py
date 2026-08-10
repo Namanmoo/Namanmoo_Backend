@@ -82,7 +82,34 @@ def _resolve_stats(category: CatalogCategory, raw: dict[str, float]) -> dict[str
         value = _finite(float(raw.get(stat.key, stat.denormalize(MISSING_STAT_RATIO))),
                         stat.denormalize(MISSING_STAT_RATIO))
         resolved[stat.key] = stat.clamp(value)
+    _enforce_dps_cap(category, resolved)
     return resolved
+
+
+def _enforce_dps_cap(category: CatalogCategory, stats: dict[str, float]) -> None:
+    """damage × 연사 속도의 곱을 maxDps 안으로 — 범위 클램프는 곱을 못 막는다.
+
+    한 방의 무게(damage)는 무기의 정체성이라 남기고 연사 속도를 깎는다.
+    판정은 Unity가 실제로 쓸 값으로 한다 — ForgeDto가 damage를 정수로
+    반올림하므로, 서버 숫자로는 상한 안이어도 반올림 후 넘을 수 있다.
+    이후 예산 축소는 두 스탯을 같이 줄이므로 곱이 다시 늘지 않는다.
+    """
+    if category.max_dps is None:
+        return
+    pair = category.dps_pair()
+    if pair is None:
+        return
+    damage_stat, rate_stat = pair
+    client_damage = max(
+        damage_stat.min, float(round(stats.get(damage_stat.key, damage_stat.min)))
+    )
+    rate = stats.get(rate_stat.key, rate_stat.min)
+    if client_damage * rate <= category.max_dps:
+        return
+    stats[damage_stat.key] = client_damage
+    stats[rate_stat.key] = max(
+        rate_stat.min, math.floor(category.max_dps / client_damage * 100) / 100
+    )
 
 
 def _resolve_delivery(

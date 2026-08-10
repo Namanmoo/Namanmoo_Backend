@@ -245,7 +245,8 @@ def default_forge_result(catalog: WeaponCatalog | None = None) -> ForgeLlmResult
         flavor="대장간이 답을 내지 못해, 구석에 있던 튼튼한 연필을 대신 쥐여 주었다.",
         category=ranged.id,
         weaponType=weapon_type,
-        # 각 스탯을 범위의 40% 지점에 — 기존 검(5/3/8/4)과 비슷한 자리다
+        # 각 스탯을 범위의 40% 지점에 — 카탈로그가 '전형적인 무기'로 상정한 자리다
+        # (원거리 기준 DPS ≈ 2, weapon-catalog.json의 $maxDps 참고)
         stats=[ParamPair(key=s.key, value=round(s.denormalize(0.4), 2)) for s in ranged.stats],
         delivery=ForgeDelivery(deliveryId=delivery.id, params=[]),
         effects=[],
