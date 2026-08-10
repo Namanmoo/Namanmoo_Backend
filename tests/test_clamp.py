@@ -222,14 +222,14 @@ def test_전부_최대로_찍으면_예산_안으로_깎인다(catalog):
 def test_예산_안이면_손대지_않는다(catalog):
     original = make_result(
         weapon_type="Projectile",  # 투사체=straight 짝을 맞춰야 궤도 교정이 없다
-        stats={"damage": 12, "shotsPerSecond": 3, "projectileSpeed": 8, "lifetime": 4},
+        stats={"damage": 2, "shotsPerSecond": 1, "projectileSpeed": 8, "lifetime": 4},
         effects=[("pierce", "on_hit", {"maxPierceCount": 2})],
     )
     weapon, report = clamp_weapon(original, catalog)
 
     assert report.clampScale is None
     assert report.dropped == []
-    assert weapon.stats_map["damage"] == 12
+    assert weapon.stats_map["damage"] == 2
     assert weapon.delivery.deliveryId == "straight"
 
 
@@ -289,6 +289,59 @@ def test_비용이_음수로_내려가지_않는다(catalog):
 
     assert all(e.cost >= 0 for e in report.effectCosts)
     assert report.totalCost >= 0
+
+
+# ── DPS 상한 ────────────────────────────────────────────────────────────
+
+
+def test_DPS_상한을_넘으면_연사_속도가_깎인다(catalog):
+    for category_id, weapon_type in (("melee", "Sword"), ("ranged", "Projectile")):
+        cat = catalog.category(category_id)
+        damage, rate = cat.dps_pair()
+        weapon, _ = clamp_weapon(
+            make_result(
+                category=category_id,
+                weapon_type=weapon_type,
+                stats={damage.key: damage.max, rate.key: rate.max},
+            ),
+            catalog,
+        )
+
+        stats = weapon.stats_map
+        assert stats[damage.key] * stats[rate.key] <= cat.max_dps + 0.01, category_id
+        # 한 방의 무게는 무기의 정체성 — damage가 아니라 연사를 깎는다
+        assert stats[damage.key] == damage.max, category_id
+
+
+def test_DPS_상한_안이면_손대지_않는다(catalog):
+    weapon, _ = clamp_weapon(
+        make_result(
+            category="melee",
+            weapon_type="Sword",
+            stats={"damage": 5, "attacksPerSecond": 0.5},
+        ),
+        catalog,
+    )
+
+    assert weapon.stats_map["damage"] == 5
+    assert weapon.stats_map["attacksPerSecond"] == 0.5
+
+
+def test_상한_판정은_클라이언트가_쓸_반올림_정수_기준이다(catalog):
+    """Unity(ForgeDto)가 damage를 정수로 반올림한다 — 서버 숫자로 상한 안이어도
+    반올림 후 넘는 조합(3.4×1.2=4.08 → 3×1.2)은 미리 잡아야 한다."""
+    weapon, _ = clamp_weapon(
+        make_result(
+            category="melee",
+            weapon_type="Sword",
+            stats={"damage": 4.4, "attacksPerSecond": 1.2},
+        ),
+        catalog,
+    )
+
+    stats = weapon.stats_map
+    assert stats["damage"] == 4  # 클라이언트와 같은 반올림으로 스냅
+    assert 4 * stats["attacksPerSecond"] <= catalog.category("melee").max_dps + 0.01
 
 
 # ── 폴백과 재검증 ────────────────────────────────────────────────────────

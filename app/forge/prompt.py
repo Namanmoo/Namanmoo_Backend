@@ -42,6 +42,11 @@ def _format_category(catalog: WeaponCatalog, category: CatalogCategory) -> str:
         f"      {s.key}: {s.min:g}~{s.max:g} (최대로 줄 때 비용 {s.weight:g})"
         for s in category.stats
     )
+    if category.max_dps is not None and (pair := category.dps_pair()):
+        stats += (
+            f"\n      ※ {pair[0].key} × {pair[1].key} ≤ {category.max_dps:g} 이어야 한다. "
+            "넘기면 서버가 연사 속도를 깎는다 — 무거운 무기는 느리게, 빠른 무기는 가볍게."
+        )
     deliveries = "\n".join(_format_entry(d) for d in catalog.deliveries_for(category.id))
     effects = "\n".join(_format_entry(e) for e in catalog.effects_for(category.id))
 

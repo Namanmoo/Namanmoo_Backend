@@ -7,6 +7,8 @@
       "id": "melee",
       "displayName_ko": "근접",
       "description_ko": "플레이어 주변을 직접 타격한다. 사거리는 짧지만 탄 소모가 없고 광역이 넓다.",
+      "$maxDps": "기준: 전형적인 무기(범위 40% 지점, damage 2.6 × 1.3회/초)가 DPS ≈3 — 버섯(체력 10)을 3초에 잡는 속도다. 상한은 기준의 1.5배로, 예산을 공격에 몰빵한 유리대포만 걸리는 안전핀. 넘으면 clamp.py 가 한 방은 남기고 연사 속도를 깎는다.",
+      "maxDps": 4.5,
       "weaponTypes": [
         "Sword",
         "Axe",
@@ -16,13 +18,13 @@
         {
           "key": "damage",
           "min": 1,
-          "max": 30,
+          "max": 5,
           "weight": 40
         },
         {
           "key": "attacksPerSecond",
           "min": 0.5,
-          "max": 5,
+          "max": 2.5,
           "weight": 30
         },
         {
@@ -43,6 +45,8 @@
       "id": "ranged",
       "displayName_ko": "원거리",
       "description_ko": "투사체를 날려 떨어진 적을 친다. 안전하지만 발당 피해가 낮고 빗나갈 수 있다.",
+      "$maxDps": "기준: 전형적인 무기(1.8 × 1.3발/초)가 DPS ≈2 — 근접보다 낮은 것은 안전한 거리에서 쏘는 대가다. 한 방 최대 3으로 콕콕 쏘는 느낌을 유지한다. 상한(기준 1.5배)을 넘으면 clamp.py 가 연사 속도를 깎는다.",
+      "maxDps": 3,
       "weaponTypes": [
         "Projectile",
         "Missile",
@@ -52,13 +56,13 @@
         {
           "key": "damage",
           "min": 1,
-          "max": 30,
+          "max": 3,
           "weight": 40
         },
         {
           "key": "shotsPerSecond",
           "min": 0.5,
-          "max": 8,
+          "max": 2.5,
           "weight": 30
         },
         {

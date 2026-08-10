@@ -66,6 +66,9 @@ class CatalogCategory:
     description: str
     weapon_types: tuple[str, ...]
     stats: tuple[CatalogStat, ...]
+    # damage × 연사 속도의 상한. None이면 상한 없음. 범위 클램프는 스탯을 하나씩만
+    # 자르므로 곱은 여기서 따로 강제해야 한다 (clamp.py).
+    max_dps: float | None = None
 
     @property
     def stat_keys(self) -> tuple[str, ...]:
@@ -73,6 +76,12 @@ class CatalogCategory:
 
     def stat(self, key: str) -> CatalogStat | None:
         return next((s for s in self.stats if s.key == key), None)
+
+    def dps_pair(self) -> tuple[CatalogStat, CatalogStat] | None:
+        """(damage 스탯, 연사 속도 스탯). 연사 속도는 키가 PerSecond로 끝나는 스탯이다."""
+        damage = self.stat("damage")
+        rate = next((s for s in self.stats if s.key.endswith("PerSecond")), None)
+        return (damage, rate) if damage and rate else None
 
 
 @dataclass(frozen=True)
@@ -187,6 +196,18 @@ class WeaponCatalog:
                 problems.append(f"분류 '{category.id}'에 쓸 수 있는 궤도가 없습니다.")
             if not category.stats:
                 problems.append(f"분류 '{category.id}'에 스탯이 정의되어 있지 않습니다.")
+            if category.max_dps is not None:
+                pair = category.dps_pair()
+                if pair is None:
+                    problems.append(
+                        f"분류 '{category.id}'에 maxDps가 있는데 damage/연사 스탯 짝이 없습니다."
+                    )
+                elif pair[0].max * pair[1].min > category.max_dps:
+                    # 상한 초과 시 연사를 깎는 방식이라, 최대 damage가 최소 연사로도
+                    # 상한을 넘으면 그 damage는 어떤 무기도 쓸 수 없다
+                    problems.append(
+                        f"분류 '{category.id}'의 damage 최대치가 최소 연사로도 maxDps를 넘습니다."
+                    )
             for weapon_type in category.weapon_types:
                 matches = [d for d in self.deliveries if d.weapon_type == weapon_type]
                 if len(matches) != 1:
@@ -246,11 +267,13 @@ def _read_entry(raw: dict[str, Any]) -> CatalogEntry:
 
 
 def _read_category(raw: dict[str, Any]) -> CatalogCategory:
+    max_dps = raw.get("maxDps")
     return CatalogCategory(
         id=raw["id"],
         display_name=raw["displayName_ko"],
         description=raw["description_ko"],
         weapon_types=tuple(raw["weaponTypes"]),
+        max_dps=float(max_dps) if max_dps is not None else None,
         stats=tuple(
             CatalogStat(
                 key=s["key"], min=float(s["min"]), max=float(s["max"]), weight=float(s["weight"])
