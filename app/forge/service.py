@@ -94,29 +94,41 @@ class LiveEngine:
             if config.has_stats_provider
             else None
         )
-        provider = config.image_provider
-        self._image_provider = provider
-
-        if provider == "cloudflare":
-            self._image_opts: Any = cloudflare_images.CloudflareImageOptions(
-                account_id=config.cloudflare_account_id,
-                api_token=config.cloudflare_api_token,
-                model=config.cloudflare_image_model,
-                timeout_s=config.timeout_s,
-            )
-        elif provider == "openai":
-            self._image_opts = openai_images.OpenAIImageOptions(
-                api_key=config.openai_api_key,
-                model=config.openai_image_model,
-                timeout_s=config.timeout_s,
-            )
-        else:
-            self._image_opts = None
+        # 시도 순서대로의 (제공자, 호출 옵션) 체인 — 앞이 실패하면 뒤로 폴백한다.
+        # 항목마다 모델을 고정할 수 있고(IMAGE_PROVIDER=gemini:모델,...), 없으면 기본 모델.
+        self._image_chain: list[tuple[str, Any]] = []
+        for provider, model in config.image_provider_chain:
+            model = model or config.default_image_model(provider)
+            if provider == "cloudflare":
+                opts: Any = cloudflare_images.CloudflareImageOptions(
+                    account_id=config.cloudflare_account_id,
+                    api_token=config.cloudflare_api_token,
+                    model=model,
+                    timeout_s=config.timeout_s,
+                )
+            elif provider == "openai":
+                opts = openai_images.OpenAIImageOptions(
+                    api_key=config.openai_api_key,
+                    model=model,
+                    timeout_s=config.timeout_s,
+                )
+            else:
+                opts = gemini.GeminiCallOptions(
+                    api_key=config.gemini_api_key,
+                    model=model,
+                    timeout_s=config.timeout_s,
+                )
+            self._image_chain.append((provider, opts))
 
     @property
     def name(self) -> str:
         stats = "gemini" if self._stats_opts else "none"
-        return f"stats={stats},image={self._image_provider or 'none'}"
+        image = (
+            "→".join(provider for provider, _ in self._image_chain)
+            if self._image_chain
+            else "none"
+        )
+        return f"stats={stats},image={image}"
 
     async def stats(self, png: bytes, note: str) -> Any:
         if self._stats_opts is None:
@@ -131,31 +143,52 @@ class LiveEngine:
         )
 
     async def image(self, png: bytes, note: str, stage: int) -> str:
-        if self._image_opts is None:
+        if not self._image_chain:
             raise RuntimeError(
                 "이미지 제공자 자격증명이 없습니다 "
-                "(CLOUDFLARE_ACCOUNT_ID+CLOUDFLARE_API_TOKEN 또는 OPENAI_API_KEY)."
+                "(GEMINI_API_KEY, OPENAI_API_KEY 또는 "
+                "CLOUDFLARE_ACCOUNT_ID+CLOUDFLARE_API_TOKEN)."
             )
 
         # 투명 배경을 흰색으로 눕혀 보낸다. 안 하면 모델이 투명 영역을 검정으로
         # 읽고 검은 배경을 그대로 보존한다 (실제로 그렇게 나왔다).
         png = flatten_to_white(png, size=IMAGE_INPUT_SIZE)
 
-        if self._image_provider == "cloudflare":
+        last_error: Exception | None = None
+        for index, (provider, opts) in enumerate(self._image_chain):
+            try:
+                return await self._generate_with(provider, opts, png, note, stage)
+            except Exception as err:
+                last_error = err
+                if index < len(self._image_chain) - 1:
+                    # 한도 초과(429)·크레딧 소진 등 — 다음 제공자로 강등해
+                    # 무기 만들기 흐름을 막지 않는다
+                    next_provider = self._image_chain[index + 1][0]
+                    print(f"{provider} 이미지 실패, {next_provider}로 폴백 — {err}")
+
+        assert last_error is not None
+        raise last_error
+
+    async def _generate_with(
+        self, provider: str, opts: Any, png: bytes, note: str, stage: int
+    ) -> str:
+        if provider == "cloudflare":
             # 단계 구분을 strength로 강제한다 — 프롬프트로 부탁하는 것보다 확실하다
             prompt, negative, strength = build_img2img_prompt(stage)
             return await cloudflare_images.generate_image_edit(
-                self._image_opts,
+                opts,
                 image_png=png,
                 prompt=prompt,
                 negative_prompt=negative,
                 strength=strength,
             )
 
-        # OpenAI는 strength가 없어 프롬프트로만 단계를 구분한다
+        # Gemini·OpenAI는 strength가 없어 프롬프트로만 단계를 구분한다
         prompt = build_refine_prompt() if stage == 1 else build_upgrade_prompt(note)
+        if provider == "gemini":
+            return await gemini.generate_image(opts, image_png=png, prompt=prompt)
         return await openai_images.generate_image_edit(
-            self._image_opts, image_png=png, prompt=prompt
+            opts, image_png=png, prompt=prompt
         )
 
 
