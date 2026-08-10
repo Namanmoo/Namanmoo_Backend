@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from datetime import date
 from typing import Any, Callable, Protocol
 
 from ..config import ServerConfig
@@ -120,6 +121,12 @@ class LiveEngine:
                 )
             self._image_chain.append((provider, opts))
 
+        # 하루 Gemini 이미지 성공 횟수 카운터 — 비용이 드는 건 성공한 생성뿐이라
+        # 성공만 센다. 서버 재시작 시 리셋되지만 상한 목적에는 충분하다.
+        self._gemini_daily_limit = config.gemini_image_daily_limit
+        self._gemini_used_on: date | None = None
+        self._gemini_used = 0
+
     @property
     def name(self) -> str:
         stats = "gemini" if self._stats_opts else "none"
@@ -156,8 +163,15 @@ class LiveEngine:
 
         last_error: Exception | None = None
         for index, (provider, opts) in enumerate(self._image_chain):
+            if provider == "gemini" and not self._gemini_budget_left():
+                print(
+                    f"Gemini 일일 한도({self._gemini_daily_limit}장) 소진 — "
+                    "다음 제공자로 넘어간다"
+                )
+                continue
+
             try:
-                return await self._generate_with(provider, opts, png, note, stage)
+                result = await self._generate_with(provider, opts, png, note, stage)
             except Exception as err:
                 last_error = err
                 if index < len(self._image_chain) - 1:
@@ -165,9 +179,32 @@ class LiveEngine:
                     # 무기 만들기 흐름을 막지 않는다
                     next_provider = self._image_chain[index + 1][0]
                     print(f"{provider} 이미지 실패, {next_provider}로 폴백 — {err}")
+                continue
 
-        assert last_error is not None
+            if provider == "gemini":
+                self._note_gemini_use()
+            return result
+
+        if last_error is None:
+            raise RuntimeError("사용 가능한 이미지 제공자가 없습니다 (일일 한도 소진).")
         raise last_error
+
+    def _gemini_budget_left(self) -> bool:
+        if self._gemini_daily_limit is None:
+            return True
+
+        today = date.today()
+        if self._gemini_used_on != today:
+            self._gemini_used_on = today
+            self._gemini_used = 0
+        return self._gemini_used < self._gemini_daily_limit
+
+    def _note_gemini_use(self) -> None:
+        today = date.today()
+        if self._gemini_used_on != today:
+            self._gemini_used_on = today
+            self._gemini_used = 0
+        self._gemini_used += 1
 
     async def _generate_with(
         self, provider: str, opts: Any, png: bytes, note: str, stage: int

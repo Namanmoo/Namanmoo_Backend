@@ -43,6 +43,10 @@ class ServerConfig:
     # Gemini 이미지 모델 — IMAGE_PROVIDER=gemini일 때만 쓴다.
     # 무료 티어는 이미지 할당이 0이라(실측) 결제 활성화(Tier 1)가 필요하다.
     gemini_image_model: str = "gemini-2.5-flash-image"
+    # 하루 Gemini 이미지 생성 성공 횟수 상한 — 콘솔에는 이미지 모델의 일일
+    # 할당량 항목이 없어서(실측) 서버가 직접 센다. 초과분은 다음 제공자로 폴백.
+    # None이면 무제한 (선불 잔액이 최종 상한).
+    gemini_image_daily_limit: int | None = None
 
     @property
     def has_stats_provider(self) -> bool:
@@ -154,4 +158,9 @@ def load_config(env: dict[str, str] | None = None) -> ServerConfig:
         timeout_s=float(src.get("FORGE_TIMEOUT_S", "180")),
         data_dir=Path(src.get("DATA_DIR", "data")),
         gemini_image_model=src.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
+        gemini_image_daily_limit=(
+            int(daily_limit)
+            if (daily_limit := (src.get("GEMINI_IMAGE_DAILY_LIMIT") or "").strip())
+            else None
+        ),
     )
